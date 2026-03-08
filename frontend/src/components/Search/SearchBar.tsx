@@ -15,7 +15,10 @@ export default function SearchBar({ filters, onFiltersChange, stages }: SearchBa
 
   useEffect(() => {
     debounceRef.current = setTimeout(() => {
-      onFiltersChange({ ...filters, search: searchText || undefined });
+      const newSearch = searchText || undefined;
+      if (newSearch !== filters.search) {
+        onFiltersChange({ ...filters, search: newSearch });
+      }
     }, 300);
     return () => clearTimeout(debounceRef.current);
   }, [searchText]);
