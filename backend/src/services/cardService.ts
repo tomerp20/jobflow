@@ -55,7 +55,7 @@ async function logActivity(
 }
 
 const ATS_PLATFORMS: { pattern: RegExp; slugFrom: 'path' | 'subdomain'; stripPrefix?: string }[] = [
-  { pattern: /^(boards|job-boards\.eu)\.greenhouse\.io$/, slugFrom: 'path' },
+  { pattern: /^(boards|job-boards|job-boards\.eu)\.greenhouse\.io$/, slugFrom: 'path' },
   { pattern: /^jobs\.lever\.co$/, slugFrom: 'path' },
   { pattern: /^[\w-]+\.wd\d+\.myworkdayjobs\.com$/, slugFrom: 'subdomain' },
   { pattern: /^jobs\.ashbyhq\.com$/, slugFrom: 'path' },
