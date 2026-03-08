@@ -54,22 +54,132 @@ async function logActivity(
   });
 }
 
-function extractRootDomain(url: string): string | null {
+const ATS_PLATFORMS: { pattern: RegExp; slugFrom: 'path' | 'subdomain'; stripPrefix?: string }[] = [
+  { pattern: /^(boards|job-boards\.eu)\.greenhouse\.io$/, slugFrom: 'path' },
+  { pattern: /^jobs\.lever\.co$/, slugFrom: 'path' },
+  { pattern: /^[\w-]+\.wd\d+\.myworkdayjobs\.com$/, slugFrom: 'subdomain' },
+  { pattern: /^jobs\.ashbyhq\.com$/, slugFrom: 'path' },
+  { pattern: /^apply\.workable\.com$/, slugFrom: 'path' },
+  { pattern: /^jobs\.smartrecruiters\.com$/, slugFrom: 'path' },
+  { pattern: /^[\w-]+\.bamboohr\.com$/, slugFrom: 'subdomain' },
+  { pattern: /^jobs\.jobvite\.com$/, slugFrom: 'path' },
+  { pattern: /^careers-[\w-]+\.icims\.com$/, slugFrom: 'subdomain', stripPrefix: 'careers-' },
+  { pattern: /^[\w-]+\.taleo\.net$/, slugFrom: 'subdomain' },
+  { pattern: /^[\w-]+\.recruitee\.com$/, slugFrom: 'subdomain' },
+  { pattern: /^(www\.)?linkedin\.com$/, slugFrom: 'path' },
+  { pattern: /^(www\.)?indeed\.com$/, slugFrom: 'path' },
+  { pattern: /^(www\.)?glassdoor\.com$/, slugFrom: 'path' },
+];
+
+function getATSEntry(hostname: string) {
+  return ATS_PLATFORMS.find((p) => p.pattern.test(hostname)) ?? null;
+}
+
+function extractATSSlug(url: string): string | null {
   try {
-    const hostname = new URL(url).hostname;
-    const parts = hostname.split('.');
-    return parts.slice(-2).join('.');
+    const parsed = new URL(url);
+    const hostname = parsed.hostname;
+    const entry = getATSEntry(hostname);
+    if (!entry) return null;
+    if (entry.slugFrom === 'subdomain') {
+      const sub = hostname.split('.')[0];
+      return entry.stripPrefix ? sub.replace(entry.stripPrefix, '') : sub;
+    }
+    const segment = parsed.pathname.split('/').find((s) => s.length > 0) ?? null;
+    return segment;
   } catch {
     return null;
   }
 }
 
-function deriveCompanyIconUrl(companyName: string, applicationUrl?: string, careersUrl?: string): string {
-  let domain: string | null = null;
-  if (applicationUrl) domain = extractRootDomain(applicationUrl);
-  if (!domain && careersUrl) domain = extractRootDomain(careersUrl);
-  if (!domain) domain = companyName.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com';
-  return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+function isATSPlatform(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname;
+    return getATSEntry(hostname) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function isConfidentMatch(
+  clearbitName: string,
+  clearbitDomain: string,
+  companyName: string,
+  atsSlug?: string | null
+): boolean {
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normalizedCompany = normalize(companyName);
+  const normalizedClearbitName = normalize(clearbitName);
+  const normalizedDomain = normalize(clearbitDomain.split('.')[0]);
+
+  const shorter = normalizedCompany.length <= normalizedClearbitName.length ? normalizedCompany : normalizedClearbitName;
+  const longer = normalizedCompany.length <= normalizedClearbitName.length ? normalizedClearbitName : normalizedCompany;
+  const nameMatch = longer.includes(shorter) && shorter.length / longer.length >= 0.6;
+
+  const slugMatch = atsSlug
+    ? normalizedDomain.includes(normalize(atsSlug)) ||
+      normalize(atsSlug).includes(normalizedDomain)
+    : true;
+
+  return nameMatch && slugMatch;
+}
+
+async function queryClearbit(companyName: string): Promise<{ name: string; domain: string } | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(
+      `https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(companyName)}`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const results = await res.json() as { name: string; domain: string }[];
+    if (!results || results.length === 0) return null;
+    return results[0];
+  } catch {
+    return null;
+  }
+}
+
+async function resolveCompanyIconUrl(
+  companyName: string,
+  applicationUrl?: string,
+  careersUrl?: string
+): Promise<string | null> {
+  if (careersUrl && !isATSPlatform(careersUrl)) {
+    try {
+      const hostname = new URL(careersUrl).hostname;
+      const parts = hostname.split('.');
+      const domain = parts.slice(-2).join('.');
+      return `https://logo.clearbit.com/${domain}`;
+    } catch { /* fall through */ }
+  }
+
+  if (applicationUrl && isATSPlatform(applicationUrl)) {
+    const slug = extractATSSlug(applicationUrl);
+    const match = await queryClearbit(companyName);
+    if (match && isConfidentMatch(match.name, match.domain, companyName, slug)) {
+      return `https://logo.clearbit.com/${match.domain}`;
+    }
+    return null;
+  }
+
+  if (applicationUrl) {
+    try {
+      const hostname = new URL(applicationUrl).hostname;
+      const parts = hostname.split('.');
+      const domain = parts.slice(-2).join('.');
+      return `https://logo.clearbit.com/${domain}`;
+    } catch { /* fall through */ }
+  }
+
+  const match = await queryClearbit(companyName);
+  if (match && isConfidentMatch(match.name, match.domain, companyName)) {
+    return `https://logo.clearbit.com/${match.domain}`;
+  }
+
+  return null;
 }
 
 export const cardService = {
@@ -168,7 +278,7 @@ export const cardService = {
         tech_stack: data.tech_stack || [],
         tags: data.tags || [],
         interest_level: data.interest_level ?? 3,
-        company_icon_url: deriveCompanyIconUrl(data.company_name, data.application_url, data.careers_url),
+        company_icon_url: await resolveCompanyIconUrl(data.company_name, data.application_url, data.careers_url),
       })
       .returning('*');
 
@@ -230,7 +340,7 @@ export const cardService = {
       const name = (data.company_name as string) || existing.company_name;
       const appUrl = 'application_url' in data ? (data.application_url as string) : existing.application_url;
       const carUrl = 'careers_url' in data ? (data.careers_url as string) : existing.careers_url;
-      updatePayload.company_icon_url = deriveCompanyIconUrl(name, appUrl, carUrl);
+      updatePayload.company_icon_url = await resolveCompanyIconUrl(name, appUrl, carUrl);
     }
 
     const [updated] = await db('cards')
