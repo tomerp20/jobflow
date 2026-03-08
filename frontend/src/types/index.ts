@@ -8,6 +8,7 @@ export interface Stage {
   id: string;
   name: string;
   position: number;
+  width?: number;
 }
 
 export interface Card {

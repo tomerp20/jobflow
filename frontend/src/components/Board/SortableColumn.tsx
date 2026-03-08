@@ -10,9 +10,10 @@ interface SortableColumnProps {
   onAddCard: () => void;
   onEditStage: (stage: Stage) => void;
   onDeleteStage: (stage: Stage) => void;
+  onResizeStage?: (stageId: string, width: number) => void;
 }
 
-export default function SortableColumn({ stage, cards, onCardClick, onAddCard, onEditStage, onDeleteStage }: SortableColumnProps) {
+export default function SortableColumn({ stage, cards, onCardClick, onAddCard, onEditStage, onDeleteStage, onResizeStage }: SortableColumnProps) {
   const {
     attributes,
     listeners,
@@ -37,6 +38,7 @@ export default function SortableColumn({ stage, cards, onCardClick, onAddCard, o
         onAddCard={onAddCard}
         onEditStage={onEditStage}
         onDeleteStage={onDeleteStage}
+        onResizeStage={onResizeStage}
         dragHandleProps={listeners}
       />
     </div>

@@ -4,6 +4,7 @@ import { AppError } from '../middleware/errorHandler';
 export interface StageData {
   name: string;
   position: number;
+  width?: number | null;
 }
 
 export const stageService = {
@@ -66,6 +67,7 @@ export const stageService = {
     const updateData: Record<string, unknown> = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.position !== undefined) updateData.position = data.position;
+    if (data.width !== undefined) updateData.width = data.width;
 
     const [updated] = await db('stages')
       .where({ id: stageId, user_id: userId })
