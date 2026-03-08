@@ -44,15 +44,17 @@ router.patch(
   validate([
     body('name').optional().isString().trim().notEmpty().withMessage('Name cannot be empty'),
     body('position').optional().isInt({ min: 0 }).withMessage('Position must be a non-negative integer'),
+    body('width').optional().isInt({ min: 200, max: 800 }).withMessage('Width must be between 200 and 800'),
   ]),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.id;
       const { id } = req.params;
-      const data: { name?: string; position?: number } = {};
+      const data: { name?: string; position?: number; width?: number } = {};
 
       if (req.body.name !== undefined) data.name = req.body.name;
       if (req.body.position !== undefined) data.position = req.body.position;
+      if (req.body.width !== undefined) data.width = req.body.width;
 
       const stage = await stageService.updateStage(id, userId, data);
       res.json({ data: stage });

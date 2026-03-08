@@ -123,7 +123,7 @@ export const stagesApi = {
     const res = await api.post('/stages', { name, position });
     return snakeToCamel(res.data.data) as Stage;
   },
-  updateStage: async (id: string, data: { name: string }): Promise<Stage> => {
+  updateStage: async (id: string, data: { name?: string; width?: number }): Promise<Stage> => {
     const res = await api.patch(`/stages/${id}`, data);
     return snakeToCamel(res.data.data) as Stage;
   },

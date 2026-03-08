@@ -27,6 +27,7 @@ interface BoardProps {
   onEditStage?: (stage: Stage) => void;
   onDeleteStage?: (stage: Stage) => void;
   onReorderStages?: (stageIds: string[]) => void;
+  onResizeStage?: (stageId: string, width: number) => void;
   onAddStage?: () => void;
 }
 
@@ -34,7 +35,7 @@ type DragType = 'card' | 'column' | null;
 
 export default function Board({
   stages, cards, loading, onMoveCard, onCardClick, onAddCard,
-  onEditStage, onDeleteStage, onReorderStages, onAddStage,
+  onEditStage, onDeleteStage, onReorderStages, onResizeStage, onAddStage,
 }: BoardProps) {
   const [activeCard, setActiveCard] = useState<Card | null>(null);
   const [activeColumn, setActiveColumn] = useState<Stage | null>(null);
@@ -178,6 +179,7 @@ export default function Board({
               onAddCard={() => onAddCard(stage.id)}
               onEditStage={onEditStage || (() => {})}
               onDeleteStage={onDeleteStage || (() => {})}
+              onResizeStage={onResizeStage}
             />
           ))}
         </SortableContext>

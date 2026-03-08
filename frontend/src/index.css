@@ -44,8 +44,7 @@
 
 /* Column styles */
 .board-column {
-  min-width: 320px;
-  max-width: 320px;
+  min-width: 200px;
   flex-shrink: 0;
   background: #f8fafc;
   border-radius: 0.75rem;
@@ -53,6 +52,23 @@
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - 12rem);
+  position: relative;
+}
+
+.column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+  border-radius: 2px;
+}
+
+.column-resize-handle:hover,
+.column-resize-handle:active {
+  background: #818cf8;
 }
 
 .board-column-cards {

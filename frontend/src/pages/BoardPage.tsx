@@ -114,6 +114,16 @@ export default function BoardPage() {
     }
   };
 
+  const handleResizeStage = async (stageId: string, width: number) => {
+    // Optimistic update
+    setStages((prev) => prev.map((s) => (s.id === stageId ? { ...s, width } : s)));
+    try {
+      await stagesApi.updateStage(stageId, { width });
+    } catch {
+      fetchData();
+    }
+  };
+
   const handleReorderStages = async (stageIds: string[]) => {
     // Optimistic update
     const reordered = stageIds.map((id, i) => {
@@ -148,6 +158,7 @@ export default function BoardPage() {
           onEditStage={handleEditStage}
           onDeleteStage={handleDeleteStage}
           onReorderStages={handleReorderStages}
+          onResizeStage={handleResizeStage}
           onAddStage={handleAddStage}
         />
       </div>
