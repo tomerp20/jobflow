@@ -54,7 +54,11 @@ async function logActivity(
   });
 }
 
-const ATS_PLATFORMS: { pattern: RegExp; slugFrom: 'path' | 'subdomain'; stripPrefix?: string; noSlug?: boolean }[] = [
+type ATSEntry =
+  | { pattern: RegExp; slugFrom: 'path' | 'subdomain'; stripPrefix?: string; noSlug?: false }
+  | { pattern: RegExp; noSlug: true };
+
+const ATS_PLATFORMS: ATSEntry[] = [
   { pattern: /^(boards|job-boards|job-boards\.eu)\.greenhouse\.io$/, slugFrom: 'path' },
   { pattern: /^jobs\.lever\.co$/, slugFrom: 'path' },
   { pattern: /^[\w-]+\.wd\d+\.myworkdayjobs\.com$/, slugFrom: 'subdomain' },
@@ -66,9 +70,9 @@ const ATS_PLATFORMS: { pattern: RegExp; slugFrom: 'path' | 'subdomain'; stripPre
   { pattern: /^careers-[\w-]+\.icims\.com$/, slugFrom: 'subdomain', stripPrefix: 'careers-' },
   { pattern: /^[\w-]+\.taleo\.net$/, slugFrom: 'subdomain' },
   { pattern: /^[\w-]+\.recruitee\.com$/, slugFrom: 'subdomain' },
-  { pattern: /^(www\.)?linkedin\.com$/, slugFrom: 'path', noSlug: true },
-  { pattern: /^(www\.)?indeed\.com$/, slugFrom: 'path', noSlug: true },
-  { pattern: /^(www\.)?glassdoor\.com$/, slugFrom: 'path', noSlug: true },
+  { pattern: /^(www\.)?linkedin\.com$/, noSlug: true },
+  { pattern: /^(www\.)?indeed\.com$/, noSlug: true },
+  { pattern: /^(www\.)?glassdoor\.com$/, noSlug: true },
 ];
 
 function getATSEntry(hostname: string) {
