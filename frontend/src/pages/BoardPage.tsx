@@ -118,7 +118,8 @@ export default function BoardPage() {
     // Optimistic update
     setStages((prev) => prev.map((s) => (s.id === stageId ? { ...s, width } : s)));
     try {
-      await stagesApi.updateStage(stageId, { width });
+      const updated = await stagesApi.updateStage(stageId, { width });
+      setStages((prev) => prev.map((s) => (s.id === stageId ? updated : s)));
     } catch {
       fetchData();
     }
