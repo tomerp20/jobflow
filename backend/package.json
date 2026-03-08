@@ -5,10 +5,11 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc",
+    "build": "tsc && npx tsc migrations/*.ts --outDir dist-migrations --esModuleInterop --skipLibCheck",
     "start": "node dist/server.js",
-    "start:prod": "npm run migrate && node dist/server.js",
+    "start:prod": "npm run migrate:prod && node dist/server.js",
     "migrate": "knex migrate:latest --knexfile knexfile.ts",
+    "migrate:prod": "knex migrate:latest --knexfile knexfile.prod.cjs",
     "migrate:rollback": "knex migrate:rollback --knexfile knexfile.ts",
     "seed": "knex seed:run --knexfile knexfile.ts",
     "test": "jest --forceExit --detectOpenHandles",
