@@ -45,9 +45,15 @@ export default function CardPreview({ card }: CardPreviewProps) {
   return (
     <div className="space-y-2">
       {/* Header */}
-      <div>
-        <h4 className="text-sm font-semibold text-gray-900 leading-tight">{card.companyName}</h4>
-        <p className="text-xs text-gray-500 mt-0.5 leading-tight">{card.roleTitle}</p>
+      <div className="flex items-start gap-2">
+        {card.companyIconUrl && (
+          <img src={card.companyIconUrl} alt="" className="w-5 h-5 rounded mt-0.5 shrink-0"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+        )}
+        <div className="min-w-0">
+          <h4 className="text-sm font-semibold text-gray-900 leading-tight">{card.companyName}</h4>
+          <p className="text-xs text-gray-500 mt-0.5 leading-tight">{card.roleTitle}</p>
+        </div>
       </div>
 
       {/* Badges row */}

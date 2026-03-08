@@ -54,6 +54,24 @@ async function logActivity(
   });
 }
 
+function extractRootDomain(url: string): string | null {
+  try {
+    const hostname = new URL(url).hostname;
+    const parts = hostname.split('.');
+    return parts.slice(-2).join('.');
+  } catch {
+    return null;
+  }
+}
+
+function deriveCompanyIconUrl(companyName: string, applicationUrl?: string, careersUrl?: string): string {
+  let domain: string | null = null;
+  if (applicationUrl) domain = extractRootDomain(applicationUrl);
+  if (!domain && careersUrl) domain = extractRootDomain(careersUrl);
+  if (!domain) domain = companyName.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com';
+  return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+}
+
 export const cardService = {
   async getAllCards(userId: string, filters: CardFilters) {
     let query = db('cards')
@@ -150,6 +168,7 @@ export const cardService = {
         tech_stack: data.tech_stack || [],
         tags: data.tags || [],
         interest_level: data.interest_level ?? 3,
+        company_icon_url: deriveCompanyIconUrl(data.company_name, data.application_url, data.careers_url),
       })
       .returning('*');
 
@@ -204,6 +223,14 @@ export const cardService = {
     }
     if ('tags' in data) {
       updatePayload.tags = data.tags || [];
+    }
+
+    // Re-derive company icon if relevant fields changed
+    if ('company_name' in data || 'application_url' in data || 'careers_url' in data) {
+      const name = (data.company_name as string) || existing.company_name;
+      const appUrl = 'application_url' in data ? (data.application_url as string) : existing.application_url;
+      const carUrl = 'careers_url' in data ? (data.careers_url as string) : existing.careers_url;
+      updatePayload.company_icon_url = deriveCompanyIconUrl(name, appUrl, carUrl);
     }
 
     const [updated] = await db('cards')

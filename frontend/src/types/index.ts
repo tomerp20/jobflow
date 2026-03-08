@@ -35,6 +35,7 @@ export interface Card {
   techStack: string[];
   tags: string[];
   interestLevel: number;
+  companyIconUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
