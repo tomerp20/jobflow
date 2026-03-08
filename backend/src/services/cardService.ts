@@ -135,8 +135,10 @@ async function queryClearbit(companyName: string): Promise<{ name: string; domai
     clearTimeout(timer);
     if (!res.ok) return null;
     const results = await res.json() as { name: string; domain: string }[];
-    if (!results || results.length === 0) return null;
-    return results[0];
+    if (!Array.isArray(results) || results.length === 0) return null;
+    const top = results[0];
+    if (!top || typeof top.name !== 'string' || typeof top.domain !== 'string') return null;
+    return top;
   } catch {
     return null;
   }
