@@ -7,8 +7,9 @@ import { errorHandler } from './middleware/errorHandler';
 const app = express();
 
 // CORS
+const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: corsOrigin.includes(',') ? corsOrigin.split(',').map(s => s.trim()) : corsOrigin,
   credentials: true,
 }));
 
