@@ -116,9 +116,15 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
       >
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10 rounded-t-xl">
-          <h2 className="text-lg font-semibold text-gray-900 truncate">
-            {card.companyName} - {card.roleTitle}
-          </h2>
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {card.companyIconUrl && (
+              <img src={card.companyIconUrl} alt="" className="w-6 h-6 rounded shrink-0"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            )}
+            <h2 className="text-lg font-semibold text-gray-900 truncate">
+              {card.companyName} - {card.roleTitle}
+            </h2>
+          </div>
           <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100 text-gray-400">
             <X size={20} />
           </button>
