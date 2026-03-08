@@ -158,7 +158,7 @@ async function resolveCompanyIconUrl(
       const hostname = new URL(careersUrl).hostname;
       const parts = hostname.split('.');
       const domain = parts.slice(-2).join('.');
-      return `https://logo.clearbit.com/${domain}`;
+      return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
     } catch { /* fall through */ }
   }
 
@@ -166,7 +166,7 @@ async function resolveCompanyIconUrl(
     const slug = extractATSSlug(applicationUrl);
     const match = await queryClearbit(companyName);
     if (match && isConfidentMatch(match.name, match.domain, companyName, slug)) {
-      return `https://logo.clearbit.com/${match.domain}`;
+      return `https://www.google.com/s2/favicons?domain=${match.domain}&sz=64`;
     }
     return null;
   }
@@ -176,13 +176,13 @@ async function resolveCompanyIconUrl(
       const hostname = new URL(applicationUrl).hostname;
       const parts = hostname.split('.');
       const domain = parts.slice(-2).join('.');
-      return `https://logo.clearbit.com/${domain}`;
+      return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
     } catch { /* fall through */ }
   }
 
   const match = await queryClearbit(companyName);
   if (match && isConfidentMatch(match.name, match.domain, companyName)) {
-    return `https://logo.clearbit.com/${match.domain}`;
+    return `https://www.google.com/s2/favicons?domain=${match.domain}&sz=64`;
   }
 
   return null;
