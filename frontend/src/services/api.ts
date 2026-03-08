@@ -119,6 +119,22 @@ export const stagesApi = {
     const res = await api.get('/stages');
     return snakeToCamel(res.data.data) as Stage[];
   },
+  createStage: async (name: string, position: number): Promise<Stage> => {
+    const res = await api.post('/stages', { name, position });
+    return snakeToCamel(res.data.data) as Stage;
+  },
+  updateStage: async (id: string, data: { name: string }): Promise<Stage> => {
+    const res = await api.patch(`/stages/${id}`, data);
+    return snakeToCamel(res.data.data) as Stage;
+  },
+  deleteStage: async (id: string): Promise<{ deletedStage: Stage; movedCardsTo: Stage; movedCardCount: number }> => {
+    const res = await api.delete(`/stages/${id}`);
+    return snakeToCamel(res.data.data) as { deletedStage: Stage; movedCardsTo: Stage; movedCardCount: number };
+  },
+  reorderStages: async (stageIds: string[]): Promise<Stage[]> => {
+    const res = await api.put('/stages/reorder', { stageIds });
+    return snakeToCamel(res.data.data) as Stage[];
+  },
 };
 
 // Cards API — backend returns { data: ... } with snake_case fields

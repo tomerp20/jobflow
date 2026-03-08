@@ -62,4 +62,36 @@ router.patch(
   }
 );
 
+// DELETE /api/stages/:id — delete a stage, move its cards to the first available stage
+router.delete('/:id', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    const { id } = req.params;
+    const result = await stageService.deleteStage(id, userId);
+    res.json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/stages/reorder — reorder all stages
+router.put(
+  '/reorder',
+  authenticate,
+  validate([
+    body('stageIds').isArray({ min: 1 }).withMessage('stageIds must be a non-empty array'),
+    body('stageIds.*').isString().withMessage('Each stageId must be a string'),
+  ]),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.id;
+      const { stageIds } = req.body;
+      const stages = await stageService.reorderStages(userId, stageIds);
+      res.json({ data: stages });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 export default router;

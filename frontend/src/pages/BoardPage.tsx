@@ -6,6 +6,7 @@ import SearchBar from '@/components/Search/SearchBar';
 import ReminderBanner from '@/components/Reminders/ReminderBanner';
 import CardDetail from '@/components/Card/CardDetail';
 import CardForm from '@/components/Card/CardForm';
+import StageForm from '@/components/Board/StageForm';
 
 export default function BoardPage() {
   const [stages, setStages] = useState<Stage[]>([]);
@@ -15,6 +16,11 @@ export default function BoardPage() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createStageId, setCreateStageId] = useState<string>('');
+
+  // Stage form state
+  const [showStageForm, setShowStageForm] = useState(false);
+  const [editingStage, setEditingStage] = useState<Stage | undefined>(undefined);
+  const [deleteConfirmStage, setDeleteConfirmStage] = useState<Stage | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -36,7 +42,6 @@ export default function BoardPage() {
   }, [fetchData]);
 
   const handleMoveCard = async (cardId: string, newStageId: string, newPosition: number) => {
-    // Optimistic update
     setCards((prev) =>
       prev.map((c) =>
         c.id === cardId ? { ...c, stageId: newStageId, position: newPosition } : c
@@ -45,7 +50,6 @@ export default function BoardPage() {
     try {
       await cardsApi.moveCard(cardId, newStageId, newPosition);
     } catch {
-      // Revert on failure
       fetchData();
     }
   };
@@ -69,6 +73,66 @@ export default function BoardPage() {
     setShowCreateForm(true);
   };
 
+  // ── Stage handlers ──────────────────────────────────────────────────────────
+
+  const handleAddStage = () => {
+    setEditingStage(undefined);
+    setShowStageForm(true);
+  };
+
+  const handleEditStage = (stage: Stage) => {
+    setEditingStage(stage);
+    setShowStageForm(true);
+  };
+
+  const handleStageSaved = (saved: Stage) => {
+    if (editingStage) {
+      // Rename: update in place
+      setStages((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
+    } else {
+      // New stage: append
+      setStages((prev) => [...prev, saved]);
+    }
+    setShowStageForm(false);
+    setEditingStage(undefined);
+  };
+
+  const handleDeleteStage = (stage: Stage) => {
+    setDeleteConfirmStage(stage);
+  };
+
+  const confirmDeleteStage = async () => {
+    if (!deleteConfirmStage) return;
+    try {
+      await stagesApi.deleteStage(deleteConfirmStage.id);
+      // Refetch everything since cards were moved
+      setDeleteConfirmStage(null);
+      fetchData();
+    } catch (err: any) {
+      console.error('Failed to delete stage:', err);
+      alert(err.response?.data?.error?.message || 'Failed to delete stage');
+    }
+  };
+
+  const handleReorderStages = async (stageIds: string[]) => {
+    // Optimistic update
+    const reordered = stageIds.map((id, i) => {
+      const stage = stages.find((s) => s.id === id)!;
+      return { ...stage, position: i };
+    });
+    setStages(reordered);
+
+    try {
+      await stagesApi.reorderStages(stageIds);
+    } catch {
+      fetchData();
+    }
+  };
+
+  const stageCardCount = deleteConfirmStage
+    ? cards.filter((c) => c.stageId === deleteConfirmStage.id).length
+    : 0;
+
   return (
     <div className="flex flex-col h-full">
       <ReminderBanner />
@@ -81,6 +145,10 @@ export default function BoardPage() {
           onMoveCard={handleMoveCard}
           onCardClick={setSelectedCardId}
           onAddCard={handleAddCard}
+          onEditStage={handleEditStage}
+          onDeleteStage={handleDeleteStage}
+          onReorderStages={handleReorderStages}
+          onAddStage={handleAddStage}
         />
       </div>
 
@@ -100,6 +168,49 @@ export default function BoardPage() {
           onClose={() => setShowCreateForm(false)}
           onCreated={handleCardCreated}
         />
+      )}
+
+      {showStageForm && (
+        <StageForm
+          stage={editingStage}
+          totalStages={stages.length}
+          onClose={() => { setShowStageForm(false); setEditingStage(undefined); }}
+          onSaved={handleStageSaved}
+        />
+      )}
+
+      {deleteConfirmStage && (
+        <div className="modal-backdrop" onClick={() => setDeleteConfirmStage(null)}>
+          <div
+            className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Stage</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              Are you sure you want to delete <strong>{deleteConfirmStage.name}</strong>?
+            </p>
+            {stageCardCount > 0 && (
+              <p className="text-sm text-amber-600 mb-4">
+                {stageCardCount} card{stageCardCount !== 1 ? 's' : ''} will be moved to the first stage.
+              </p>
+            )}
+            {stageCardCount === 0 && <div className="mb-4" />}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteConfirmStage(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteStage}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
