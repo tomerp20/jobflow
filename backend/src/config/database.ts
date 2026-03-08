@@ -10,7 +10,9 @@ const config: Knex.Config = {
   client: 'pg',
   connection: {
     connectionString: process.env.DATABASE_URL || 'postgresql://jobflow:jobflow@localhost:5432/jobflow',
-    ssl: environment === 'production' ? { rejectUnauthorized: false } : false,
+    ssl: environment === 'production' && (process.env.DATABASE_URL || '').includes('.render.com')
+      ? { rejectUnauthorized: false }
+      : false,
   },
   pool: {
     min: 2,
