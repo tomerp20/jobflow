@@ -3,6 +3,13 @@ import { cardsApi } from '@/services/api';
 import type { Card, Stage } from '@/types';
 import { X, Plus } from 'lucide-react';
 
+function toLocalDateStr(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 interface CardFormProps {
   stageId: string;
   stages: Stage[];
@@ -23,8 +30,12 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
   const [salaryCurrency, setSalaryCurrency] = useState('USD');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
   const [notes, setNotes] = useState('');
-  const [dateApplied, setDateApplied] = useState('');
-  const [nextFollowupDate, setNextFollowupDate] = useState('');
+  const [dateApplied, setDateApplied] = useState(() => toLocalDateStr(new Date()));
+  const [nextFollowupDate, setNextFollowupDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return toLocalDateStr(d);
+  });
   const [recruiterName, setRecruiterName] = useState('');
   const [recruiterEmail, setRecruiterEmail] = useState('');
   const [techStackInput, setTechStackInput] = useState('');
