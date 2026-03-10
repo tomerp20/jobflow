@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useAutoResize } from '../../hooks/useAutoResize';
 import { cardsApi } from '@/services/api';
 import type { Card, CardActivity } from '@/types';
 import {
@@ -13,6 +12,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { useAutoResize } from '../../hooks/useAutoResize';
 
 interface CardDetailProps {
   cardId: string;
