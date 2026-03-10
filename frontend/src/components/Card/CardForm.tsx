@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { cardsApi } from '@/services/api';
 import type { Card, Stage } from '@/types';
 import { X, Plus } from 'lucide-react';
-import { useAutoResize } from '../../hooks/useAutoResize';
+import { useAutoResize } from '@/hooks/useAutoResize';
 
 function toLocalDateStr(date: Date): string {
   const year = date.getFullYear();

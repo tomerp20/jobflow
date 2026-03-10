@@ -12,7 +12,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { useAutoResize } from '../../hooks/useAutoResize';
+import { useAutoResize } from '@/hooks/useAutoResize';
 
 interface CardDetailProps {
   cardId: string;
