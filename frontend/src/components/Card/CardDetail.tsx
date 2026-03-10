@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAutoResize } from '../../hooks/useAutoResize';
 import { cardsApi } from '@/services/api';
 import type { Card, CardActivity } from '@/types';
 import {
@@ -87,6 +88,8 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
       console.error('Failed to add note:', err);
     }
   };
+
+  const notesRef = useAutoResize(editData.notes || '');
 
   const updateField = (field: string, value: any) => {
     setEditData((prev) => ({ ...prev, [field]: value }));
@@ -347,10 +350,10 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
           <div>
             <label className="label-text">Notes</label>
             <textarea
+              ref={notesRef}
               value={editData.notes || ''}
               onChange={(e) => updateField('notes', e.target.value)}
-              rows={3}
-              className="input-field resize-none"
+              className="input-field overflow-hidden min-h-[4.5rem]"
               placeholder="General notes about this application..."
             />
           </div>
