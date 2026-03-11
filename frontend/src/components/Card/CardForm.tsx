@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { cardsApi } from '@/services/api';
 import type { Card, Stage } from '@/types';
 import { X, Plus } from 'lucide-react';
+import { useAutoResize } from '@/hooks/useAutoResize';
 
 function toLocalDateStr(date: Date): string {
   const year = date.getFullYear();
@@ -44,6 +45,7 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
   const [selectedStageId, setSelectedStageId] = useState(stageId);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const notesRef = useAutoResize(notes);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -364,10 +366,10 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
           <div>
             <label className="label-text">Notes</label>
             <textarea
+              ref={notesRef}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              className="input-field resize-none"
+              className="input-field overflow-hidden min-h-[4.5rem]"
               placeholder="Any initial notes..."
             />
           </div>
