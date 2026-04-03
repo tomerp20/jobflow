@@ -22,7 +22,7 @@ from typing import Optional
 import httpx
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
 
 DATASET_URL = (
     "https://raw.githubusercontent.com/TheBSD/scraping-israeli-data/"
-    "master/companies/companies.json"
+    "refs/heads/main/4.startupnationcentral/Results-Folder/Json-Files/companies.json"
 )
 SERPER_URL = "https://google.serper.dev/search"
 CONCURRENCY = 5
@@ -89,7 +89,7 @@ async def stage1_careers(
     Returns (drop_result, html) where drop_result is set if the company
     should be dropped, html is the fetched page HTML (reused in Stage 3).
     """
-    website = company.get("website") or company.get("url") or ""
+    website = company.get("website") or ""
     if not website:
         return {"reason": "no website field", "stage": 1}, None
 
@@ -102,7 +102,7 @@ async def stage1_careers(
         )
         html = resp.text
     except Exception as exc:
-        log.info("[Stage 1] %s -> unreachable: %s", company.get("name", "?"), exc)
+        log.info("[Stage 1] %s -> unreachable: %s", company.get("company_name", "?"), exc)
         return {"reason": f"unreachable: {exc}", "stage": 1}, None
 
     html_lower = html.lower()
@@ -124,12 +124,12 @@ async def stage1_careers(
                 break
 
     if not careers_url:
-        log.info("[Stage 1] %s -> dropped: no careers entry point", company.get("name", "?"))
+        log.info("[Stage 1] %s -> dropped: no careers entry point", company.get("company_name", "?"))
         return {"reason": "no careers entry point found", "stage": 1}, None
 
     log.info(
         "[Stage 1] %s -> careers found: %s (%s)",
-        company.get("name", "?"),
+        company.get("company_name", "?"),
         careers_url,
         ats_found or "local path",
     )
@@ -185,7 +185,7 @@ async def stage2_headcount(
     Returns drop_result if company should be dropped, else None.
     Modifies company dict in-place: sets _headcount, _headcount_verified.
     """
-    name = company.get("name", "?")
+    name = company.get("company_name", "?")
     headcount: Optional[int] = None
     verified = False
 
@@ -211,12 +211,7 @@ async def stage2_headcount(
 
     # Fallback to source JSON field
     if headcount is None:
-        source_field = (
-            company.get("num_employees")
-            or company.get("employees")
-            or company.get("size")
-            or ""
-        )
+        source_field = company.get("num_employees") or ""
         headcount = _parse_headcount_from_source(str(source_field))
 
     company["_headcount"] = headcount
@@ -275,9 +270,11 @@ def stage3_extract(html: str) -> dict:
 # Stage 4 — LLM Classification (Gemini 1.5 Flash)
 # ---------------------------------------------------------------------------
 
-def _classify_sync(model: genai.GenerativeModel, prompt: str) -> Optional[dict]:
+def _classify_sync(client: genai.Client, prompt: str) -> Optional[dict]:
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-1.5-flash", contents=prompt
+        )
         text = response.text.strip()
         # Strip markdown backticks if present
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -292,16 +289,16 @@ def _classify_sync(model: genai.GenerativeModel, prompt: str) -> Optional[dict]:
 
 
 async def stage4_classify(
-    model: genai.GenerativeModel,
+    client: genai.Client,
     company: dict,
     extracted: dict,
     semaphore: asyncio.Semaphore,
 ) -> Optional[dict]:
-    name = company.get("name", "?")
+    name = company.get("company_name", "?")
     prompt = GEMINI_PROMPT.format(
         company_name=name,
-        sector=company.get("sector") or company.get("industry") or "",
-        website=company.get("website") or company.get("url") or "",
+        sector=company.get("sector") or "",
+        website=company.get("website") or "",
         meta_description=extracted.get("meta_description", ""),
         og_description=extracted.get("og_description", ""),
         page_title=extracted.get("page_title", ""),
@@ -309,7 +306,7 @@ async def stage4_classify(
     )
 
     async with semaphore:
-        classification = await asyncio.to_thread(_classify_sync, model, prompt)
+        classification = await asyncio.to_thread(_classify_sync, client, prompt)
 
     if classification is None:
         log.warning("[Stage 4] %s -> classification failed, keeping with null", name)
@@ -341,14 +338,14 @@ async def process_company(
     client: httpx.AsyncClient,
     company: dict,
     serper_key: str,
-    gemini_model: genai.GenerativeModel,
+    gemini_client: genai.Client,
     semaphore: asyncio.Semaphore,
     index: int,
 ) -> dict:
-    name = company.get("name", f"company_{index}")
+    name = company.get("company_name", f"company_{index}")
 
     # Validate required fields exist
-    if not company.get("website") and not company.get("url"):
+    if not company.get("website"):
         return {
             "company_id": index + 1,
             "company_name": name,
@@ -372,11 +369,9 @@ async def process_company(
     result: dict = {
         "company_id": index + 1,
         "company_name": name,
-        "website": company.get("website") or company.get("url") or "",
-        "sector": company.get("sector") or company.get("industry") or "",
-        "num_employees_source": str(
-            company.get("num_employees") or company.get("employees") or company.get("size") or ""
-        ),
+        "website": company.get("website") or "",
+        "sector": company.get("sector") or "",
+        "num_employees_source": str(company.get("num_employees") or ""),
         "status": "dropped",
         "drop_reason": None,
         "drop_stage": None,
@@ -420,7 +415,7 @@ async def process_company(
         result.update(extracted)
 
         # --- Stage 4 ---
-        classification = await stage4_classify(gemini_model, company, extracted, semaphore)
+        classification = await stage4_classify(gemini_client, company, extracted, semaphore)
         if isinstance(classification, dict) and classification.get("stage") == 4:
             result["drop_reason"] = classification.get("reason")
             result["drop_stage"] = classification.get("stage")
@@ -453,8 +448,7 @@ async def main() -> None:
             "SERPER_API_KEY is not set. Headcount verification will rely on source JSON only."
         )
 
-    genai.configure(api_key=google_key)
-    gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+    gemini_client = genai.Client(api_key=google_key)
 
     # Fetch dataset
     log.info("Fetching dataset from %s …", DATASET_URL)
@@ -483,7 +477,7 @@ async def main() -> None:
         follow_redirects=True,
     ) as client:
         tasks = [
-            process_company(client, company, serper_key, gemini_model, semaphore, i)
+            process_company(client, company, serper_key, gemini_client, semaphore, i)
             for i, company in enumerate(companies)
         ]
         results = await asyncio.gather(*tasks)
