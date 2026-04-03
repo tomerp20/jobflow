@@ -54,9 +54,16 @@ ATS_PATTERNS = [
     ("workable", "apply.workable.com"),
     ("ashby", "jobs.ashbyhq.com"),
     ("bamboohr", "bamboohr.com/careers"),
+    ("workday", "myworkdayjobs.com"),
+    ("smartrecruiters", "smartrecruiters.com/"),
+    ("recruitee", "recruitee.com/"),
+    ("icims", "icims.com/"),
+    ("taleo", "taleo.net/"),
+    ("rippling", "app.rippling.com/jobs"),
 ]
 
-CAREER_PATHS = ["/careers", "/jobs", "/work-with-us", "/join-us", "/hiring"]
+# Paths probed directly when HTML scan finds nothing (handles JS-rendered sites)
+CAREER_PATHS = ["/careers", "/jobs", "/work-with-us", "/join-us", "/hiring", "/open-positions", "/openings", "/positions", "/team/join", "/about/careers"]
 
 GEMINI_PROMPT = """\
 You are a job-market analyst helping a senior backend developer find relevant Israeli companies.
@@ -82,13 +89,39 @@ Classify and return ONLY valid JSON (no markdown, no backticks):
 # Stage 1 — Careers Discovery
 # ---------------------------------------------------------------------------
 
+async def _probe_career_paths(
+    client: httpx.AsyncClient, base_url: str
+) -> Optional[str]:
+    """
+    Try fetching each career path directly. Returns the first path that
+    responds with 2xx. Used as fallback for JS-rendered sites where links
+    don't appear in static HTML.
+    """
+    base = base_url.rstrip("/")
+    for path in CAREER_PATHS:
+        url = base + path
+        try:
+            resp = await client.get(url, timeout=REQUEST_TIMEOUT, follow_redirects=True)
+            if resp.status_code < 300:
+                return path
+        except Exception:
+            continue
+    return None
+
+
 async def stage1_careers(
     client: httpx.AsyncClient, company: dict
 ) -> tuple[Optional[dict], Optional[str]]:
     """
     Returns (drop_result, html) where drop_result is set if the company
     should be dropped, html is the fetched page HTML (reused in Stage 3).
+
+    Two-pass approach:
+      Pass 1 — scan static HTML for ATS fingerprints and career path links.
+      Pass 2 — if nothing found (JS-rendered sites), probe each career path
+                directly with a live HTTP request.
     """
+    name = company.get("company_name", "?")
     website = company.get("website") or ""
     if not website:
         return {"reason": "no website field", "stage": 1}, None
@@ -102,12 +135,12 @@ async def stage1_careers(
         )
         html = resp.text
     except Exception as exc:
-        log.info("[Stage 1] %s -> unreachable: %s", company.get("company_name", "?"), exc)
+        log.info("[Stage 1] %s -> unreachable: %s", name, exc)
         return {"reason": f"unreachable: {exc}", "stage": 1}, None
 
     html_lower = html.lower()
 
-    # Check ATS fingerprint
+    # Pass 1a — ATS fingerprint in static HTML
     ats_found = None
     careers_url = None
     for platform, pattern in ATS_PATTERNS:
@@ -116,22 +149,27 @@ async def stage1_careers(
             careers_url = pattern
             break
 
-    # Check local career paths
-    if not ats_found:
+    # Pass 1b — career path href in static HTML
+    if not careers_url:
         for path in CAREER_PATHS:
             if path in html_lower:
                 careers_url = path
                 break
 
+    # Pass 2 — probe paths directly (handles JS-rendered / SPA sites)
     if not careers_url:
-        log.info("[Stage 1] %s -> dropped: no careers entry point", company.get("company_name", "?"))
+        log.info("[Stage 1] %s -> static scan empty, probing career paths…", name)
+        careers_url = await _probe_career_paths(client, website)
+
+    if not careers_url:
+        log.info("[Stage 1] %s -> dropped: no careers entry point", name)
         return {"reason": "no careers entry point found", "stage": 1}, None
 
     log.info(
         "[Stage 1] %s -> careers found: %s (%s)",
-        company.get("company_name", "?"),
+        name,
         careers_url,
-        ats_found or "local path",
+        ats_found or "direct probe",
     )
     company["_careers_url"] = careers_url
     company["_ats_platform"] = ats_found
