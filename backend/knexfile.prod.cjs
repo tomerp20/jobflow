@@ -1,12 +1,13 @@
 require('dotenv').config();
 
-const isExternal = (process.env.DATABASE_URL || '').includes('.render.com');
+const dbUrl = process.env.DATABASE_URL || '';
+const requiresSsl = dbUrl.includes('.render.com') || dbUrl.includes('.neon.tech');
 
 module.exports = {
   client: 'pg',
   connection: {
-    connectionString: process.env.DATABASE_URL,
-    ssl: isExternal ? { rejectUnauthorized: false } : false,
+    connectionString: dbUrl,
+    ssl: requiresSsl ? { rejectUnauthorized: false } : false,
   },
   migrations: {
     directory: './dist-migrations',
