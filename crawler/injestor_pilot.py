@@ -84,6 +84,10 @@ Classify and return ONLY valid JSON (no markdown, no backticks):
   "is_relevant_for_senior_backend": <true|false>
 }}"""
 
+# Sentinel used by stage4_classify to signal a drop without ambiguity.
+# Using a distinct object avoids colliding with any key in a real classification dict.
+_STAGE4_DROP = object()
+
 
 # ---------------------------------------------------------------------------
 # Stage 1 — Careers Discovery
@@ -126,12 +130,14 @@ async def stage1_careers(
       Pass 2 — if nothing found (JS-rendered sites), probe each career path
                 directly with a live HTTP request.
     """
-    _empty_meta: dict = {"careers_url": None, "ats_platform": None, "careers_detected": False}
-
     name = company.get("company_name", "?")
     website = company.get("website") or ""
     if not website:
-        return {"reason": "no website field", "stage": 1}, None, _empty_meta
+        return (
+            {"reason": "no website field", "stage": 1},
+            None,
+            {"careers_url": None, "ats_platform": None, "careers_detected": False},
+        )
 
     if not website.startswith("http"):
         website = "https://" + website
@@ -143,7 +149,11 @@ async def stage1_careers(
         html = resp.text
     except Exception as exc:
         log.info("[Stage 1] %s -> unreachable: %s", name, exc)
-        return {"reason": f"unreachable: {exc}", "stage": 1}, None, _empty_meta
+        return (
+            {"reason": f"unreachable: {exc}", "stage": 1},
+            None,
+            {"careers_url": None, "ats_platform": None, "careers_detected": False},
+        )
 
     html_lower = html.lower()
 
@@ -156,11 +166,16 @@ async def stage1_careers(
             careers_url = pattern
             break
 
-    # Pass 1b — career path href in static HTML
+    # Pass 1b — career path href in static HTML (scoped to <a href> attributes only)
     if not careers_url:
-        for path in CAREER_PATHS:
-            if path in html_lower:
-                careers_url = path
+        soup_pass1 = BeautifulSoup(html, "html.parser")
+        for a_tag in soup_pass1.find_all("a", href=True):
+            href = a_tag["href"].lower()
+            for path in CAREER_PATHS:
+                if href == path or href.startswith(path + "/") or href.startswith(path + "?"):
+                    careers_url = path
+                    break
+            if careers_url:
                 break
 
     # Pass 2 — probe paths directly (handles JS-rendered / SPA sites)
@@ -225,7 +240,7 @@ def _parse_headcount_from_source(num_employees_field: str) -> Optional[int]:
 
 
 _CAREER_LINK_KEYWORDS = (
-    "/careers", "/jobs", "/work", "/join", "/hiring",
+    "/careers", "/jobs", "/hiring", "/open-positions", "/openings",
     "greenhouse.io", "lever.co", "workable.com",
     "ashbyhq.com", "comeet.com", "smartrecruiters.com", "bamboohr.com",
 )
@@ -258,10 +273,10 @@ async def stage2_headcount_and_careers(
 
     if serper_key:
         try:
-            await asyncio.sleep(0.5)
             payload = {"q": f'"{name}" employees OR careers OR jobs', "num": 10}
             headers = {"X-API-KEY": serper_key, "Content-Type": "application/json"}
             async with semaphore:
+                await asyncio.sleep(0.5)  # inside semaphore: spaces out slot releases for rate-limiting
                 resp = await client.post(
                     SERPER_URL, json=payload, headers=headers, timeout=10.0
                 )
@@ -369,21 +384,32 @@ def _classify_sync(client: genai.Client, prompt: str) -> Optional[dict]:
         return None
 
 
+def _sanitize_for_prompt(value: str, max_len: int = 500) -> str:
+    """Strip newlines and truncate to limit prompt injection via field values."""
+    return value.replace("\n", " ").replace("\r", " ")[:max_len]
+
+
 async def stage4_classify(
     client: genai.Client,
     company: dict,
     extracted: dict,
     semaphore: asyncio.Semaphore,
-) -> Optional[dict]:
+):
+    """
+    Returns:
+      _STAGE4_DROP  — company should be dropped (classified IRRELEVANT)
+      None          — classification failed; company is kept with null classification
+      dict          — valid classification result
+    """
     name = company.get("company_name", "?")
     prompt = GEMINI_PROMPT.format(
-        company_name=name,
-        sector=company.get("sector") or "",
-        website=company.get("website") or "",
-        meta_description=extracted.get("meta_description", ""),
-        og_description=extracted.get("og_description", ""),
-        page_title=extracted.get("page_title", ""),
-        body_snippet=extracted.get("body_snippet", ""),
+        company_name=_sanitize_for_prompt(name, 100),
+        sector=_sanitize_for_prompt(company.get("sector") or "", 100),
+        website=_sanitize_for_prompt(company.get("website") or "", 200),
+        meta_description=_sanitize_for_prompt(extracted.get("meta_description", ""), 300),
+        og_description=_sanitize_for_prompt(extracted.get("og_description", ""), 300),
+        page_title=_sanitize_for_prompt(extracted.get("page_title", ""), 200),
+        body_snippet=_sanitize_for_prompt(extracted.get("body_snippet", ""), 1500),
     )
 
     async with semaphore:
@@ -399,7 +425,7 @@ async def stage4_classify(
 
     if category == "IRRELEVANT":
         log.info("[Stage 4] %s -> dropped: IRRELEVANT", name)
-        return {"reason": "classified as IRRELEVANT", "stage": 4}
+        return _STAGE4_DROP
 
     log.info(
         "[Stage 4] %s -> %s (score: %s, relevant: %s)",
@@ -508,9 +534,9 @@ async def process_company(
 
         # --- Stage 4 ---
         classification = await stage4_classify(gemini_client, company, extracted, semaphore)
-        if isinstance(classification, dict) and classification.get("stage") == 4:
-            result["drop_reason"] = classification.get("reason")
-            result["drop_stage"] = classification.get("stage")
+        if classification is _STAGE4_DROP:
+            result["drop_reason"] = "classified as IRRELEVANT"
+            result["drop_stage"] = 4
             return result
 
         result["classification"] = classification
@@ -579,7 +605,6 @@ async def main() -> None:
             kept += 1
         else:
             stage = r.get("drop_stage")
-            reason = r.get("drop_reason", "")
             if stage == 1:
                 drop_breakdown["stage_1_unreachable"] += 1
             elif stage == 2:
