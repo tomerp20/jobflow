@@ -111,20 +111,27 @@ async def _probe_career_paths(
 
 async def stage1_careers(
     client: httpx.AsyncClient, company: dict
-) -> tuple[Optional[dict], Optional[str]]:
+) -> tuple[Optional[dict], Optional[str], dict]:
     """
-    Returns (drop_result, html) where drop_result is set if the company
-    should be dropped, html is the fetched page HTML (reused in Stage 3).
+    Returns (drop_result, html, careers_meta).
+
+    drop_result is set only when the company is genuinely unreachable or has
+    no website — NOT when careers detection fails (that is a detection
+    limitation, not evidence the company isn't hiring).
+
+    careers_meta: {"careers_url": str|None, "ats_platform": str|None, "careers_detected": bool}
 
     Two-pass approach:
       Pass 1 — scan static HTML for ATS fingerprints and career path links.
       Pass 2 — if nothing found (JS-rendered sites), probe each career path
                 directly with a live HTTP request.
     """
+    _empty_meta: dict = {"careers_url": None, "ats_platform": None, "careers_detected": False}
+
     name = company.get("company_name", "?")
     website = company.get("website") or ""
     if not website:
-        return {"reason": "no website field", "stage": 1}, None
+        return {"reason": "no website field", "stage": 1}, None, _empty_meta
 
     if not website.startswith("http"):
         website = "https://" + website
@@ -136,7 +143,7 @@ async def stage1_careers(
         html = resp.text
     except Exception as exc:
         log.info("[Stage 1] %s -> unreachable: %s", name, exc)
-        return {"reason": f"unreachable: {exc}", "stage": 1}, None
+        return {"reason": f"unreachable: {exc}", "stage": 1}, None, _empty_meta
 
     html_lower = html.lower()
 
@@ -161,19 +168,23 @@ async def stage1_careers(
         log.info("[Stage 1] %s -> static scan empty, probing career paths…", name)
         careers_url = await _probe_career_paths(client, website)
 
-    if not careers_url:
-        log.info("[Stage 1] %s -> dropped: no careers entry point", name)
-        return {"reason": "no careers entry point found", "stage": 1}, None
+    careers_detected = careers_url is not None
+    if careers_detected:
+        log.info(
+            "[Stage 1] %s -> careers found: %s (%s)",
+            name,
+            careers_url,
+            ats_found or "direct probe",
+        )
+    else:
+        log.info("[Stage 1] %s -> careers not detected (passing through to Stage 2)", name)
 
-    log.info(
-        "[Stage 1] %s -> careers found: %s (%s)",
-        name,
-        careers_url,
-        ats_found or "direct probe",
-    )
-    company["_careers_url"] = careers_url
-    company["_ats_platform"] = ats_found
-    return None, html
+    careers_meta = {
+        "careers_url": careers_url,
+        "ats_platform": ats_found,
+        "careers_detected": careers_detected,
+    }
+    return None, html, careers_meta
 
 
 # ---------------------------------------------------------------------------
@@ -213,37 +224,69 @@ def _parse_headcount_from_source(num_employees_field: str) -> Optional[int]:
     return None
 
 
-async def stage2_headcount(
+_CAREER_LINK_KEYWORDS = (
+    "/careers", "/jobs", "/work", "/join", "/hiring",
+    "greenhouse.io", "lever.co", "workable.com",
+    "ashbyhq.com", "comeet.com", "smartrecruiters.com", "bamboohr.com",
+)
+
+
+def _detect_ats(link_lower: str) -> Optional[str]:
+    for platform, pattern in ATS_PATTERNS:
+        if pattern in link_lower:
+            return platform
+    return None
+
+
+async def stage2_headcount_and_careers(
     client: httpx.AsyncClient,
     company: dict,
     serper_key: str,
     semaphore: asyncio.Semaphore,
-) -> Optional[dict]:
+    existing_careers_url: Optional[str],
+) -> tuple[Optional[dict], dict]:
     """
-    Returns drop_result if company should be dropped, else None.
-    Modifies company dict in-place: sets _headcount, _headcount_verified.
+    Consolidated Serper call: headcount verification + careers URL enrichment.
+
+    Returns (drop_result, enrichment) where enrichment may contain
+    careers_url / ats_platform if Stage 1 left them null and Serper found one.
     """
     name = company.get("company_name", "?")
     headcount: Optional[int] = None
     verified = False
+    enrichment: dict = {}
 
     if serper_key:
         try:
             await asyncio.sleep(0.5)
-            payload = {"q": f'site:linkedin.com/company "{name}" employees', "num": 5}
+            payload = {"q": f'"{name}" employees OR careers OR jobs', "num": 10}
             headers = {"X-API-KEY": serper_key, "Content-Type": "application/json"}
             async with semaphore:
                 resp = await client.post(
                     SERPER_URL, json=payload, headers=headers, timeout=10.0
                 )
             data = resp.json()
-            for item in data.get("organic", []):
+            organic = data.get("organic", [])
+
+            # Parse headcount
+            for item in organic:
                 snippet = item.get("snippet", "")
                 parsed = _parse_headcount_from_snippet(snippet)
                 if parsed is not None:
                     headcount = parsed
                     verified = True
                     break
+
+            # Enrich careers URL if Stage 1 found nothing
+            if existing_careers_url is None:
+                for item in organic:
+                    link = item.get("link", "")
+                    link_lower = link.lower()
+                    if any(kw in link_lower for kw in _CAREER_LINK_KEYWORDS):
+                        enrichment["careers_url"] = link
+                        enrichment["ats_platform"] = _detect_ats(link_lower)
+                        break
+
         except Exception as exc:
             log.warning("[Stage 2] %s -> Serper call failed: %s", name, exc)
 
@@ -257,7 +300,7 @@ async def stage2_headcount(
 
     if headcount is not None and headcount < 20:
         log.info("[Stage 2] %s -> dropped: headcount %d < 20", name, headcount)
-        return {"reason": f"headcount {headcount} < 20", "stage": 2}
+        return {"reason": f"headcount {headcount} < 20", "stage": 2}, enrichment
 
     log.info(
         "[Stage 2] %s -> headcount: %s (%s)",
@@ -265,7 +308,7 @@ async def stage2_headcount(
         headcount if headcount is not None else "unknown",
         "verified" if verified else "unverified",
     )
-    return None
+    return None, enrichment
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +438,7 @@ async def process_company(
             "drop_stage": 1,
             "careers_url": None,
             "ats_platform": None,
+            "careers_detected": False,
             "headcount": None,
             "headcount_verified": False,
             "meta_description": None,
@@ -415,6 +459,7 @@ async def process_company(
         "drop_stage": None,
         "careers_url": None,
         "ats_platform": None,
+        "careers_detected": False,
         "headcount": None,
         "headcount_verified": False,
         "meta_description": None,
@@ -427,17 +472,26 @@ async def process_company(
     try:
         # --- Stage 1 ---
         async with semaphore:
-            drop, html = await stage1_careers(client, company)
+            drop, html, careers_meta = await stage1_careers(client, company)
         if drop:
             result["drop_reason"] = drop["reason"]
             result["drop_stage"] = drop["stage"]
             return result
 
-        result["careers_url"] = company.get("_careers_url")
-        result["ats_platform"] = company.get("_ats_platform")
+        result["careers_url"] = careers_meta["careers_url"]
+        result["ats_platform"] = careers_meta["ats_platform"]
+        result["careers_detected"] = careers_meta["careers_detected"]
 
-        # --- Stage 2 ---
-        drop = await stage2_headcount(client, company, serper_key, semaphore)
+        # --- Stage 2 (headcount + careers enrichment) ---
+        drop, enrichment = await stage2_headcount_and_careers(
+            client, company, serper_key, semaphore,
+            existing_careers_url=result["careers_url"],
+        )
+        if enrichment.get("careers_url"):
+            result["careers_url"] = enrichment["careers_url"]
+            result["ats_platform"] = enrichment["ats_platform"]
+            result["careers_detected"] = True
+
         if drop:
             result["drop_reason"] = drop["reason"]
             result["drop_stage"] = drop["stage"]
@@ -505,7 +559,6 @@ async def main() -> None:
     semaphore = asyncio.Semaphore(CONCURRENCY)
     drop_breakdown = {
         "stage_1_unreachable": 0,
-        "stage_1_no_careers": 0,
         "stage_2_headcount_too_small": 0,
         "stage_4_irrelevant": 0,
     }
@@ -527,10 +580,8 @@ async def main() -> None:
         else:
             stage = r.get("drop_stage")
             reason = r.get("drop_reason", "")
-            if stage == 1 and "unreachable" in (reason or ""):
+            if stage == 1:
                 drop_breakdown["stage_1_unreachable"] += 1
-            elif stage == 1:
-                drop_breakdown["stage_1_no_careers"] += 1
             elif stage == 2:
                 drop_breakdown["stage_2_headcount_too_small"] += 1
             elif stage == 4:
