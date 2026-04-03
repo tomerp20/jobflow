@@ -44,3 +44,7 @@ pgdata/
 .parcel-cache/
 settings.json
 *.tsbuildinfo
+
+# Crawler
+crawler/.env
+crawler/pilot_results.json
