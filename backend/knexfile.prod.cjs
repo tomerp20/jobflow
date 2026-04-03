@@ -9,6 +9,7 @@ module.exports = {
     connectionString: dbUrl,
     ssl: requiresSsl ? { rejectUnauthorized: false } : false,
   },
+  searchPath: ['public'],
   migrations: {
     directory: './dist-migrations',
   },
