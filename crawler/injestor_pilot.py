@@ -284,7 +284,7 @@ def _classify_sync(model: genai.GenerativeModel, prompt: str) -> Optional[dict]:
         text = re.sub(r"\s*```$", "", text)
         return json.loads(text)
     except json.JSONDecodeError as exc:
-        log.warning("[Stage 4] JSON parse failed: %s", exc)
+        log.warning("[Stage 4] JSON parse failed: %s (response: %s)", exc, text[:200] if text else "(empty)")
         return None
     except Exception as exc:
         log.warning("[Stage 4] Gemini call failed: %s", exc)
@@ -295,6 +295,7 @@ async def stage4_classify(
     model: genai.GenerativeModel,
     company: dict,
     extracted: dict,
+    semaphore: asyncio.Semaphore,
 ) -> Optional[dict]:
     name = company.get("name", "?")
     prompt = GEMINI_PROMPT.format(
@@ -307,7 +308,8 @@ async def stage4_classify(
         body_snippet=extracted.get("body_snippet", ""),
     )
 
-    classification = await asyncio.to_thread(_classify_sync, model, prompt)
+    async with semaphore:
+        classification = await asyncio.to_thread(_classify_sync, model, prompt)
 
     if classification is None:
         log.warning("[Stage 4] %s -> classification failed, keeping with null", name)
@@ -319,7 +321,7 @@ async def stage4_classify(
 
     if category == "IRRELEVANT":
         log.info("[Stage 4] %s -> dropped: IRRELEVANT", name)
-        return "DROP_IRRELEVANT"
+        return {"reason": "classified as IRRELEVANT", "stage": 4}
 
     log.info(
         "[Stage 4] %s -> %s (score: %s, relevant: %s)",
@@ -344,6 +346,29 @@ async def process_company(
     index: int,
 ) -> dict:
     name = company.get("name", f"company_{index}")
+
+    # Validate required fields exist
+    if not company.get("website") and not company.get("url"):
+        return {
+            "company_id": index + 1,
+            "company_name": name,
+            "website": "",
+            "sector": "",
+            "num_employees_source": "",
+            "status": "dropped",
+            "drop_reason": "missing website field",
+            "drop_stage": 1,
+            "careers_url": None,
+            "ats_platform": None,
+            "headcount": None,
+            "headcount_verified": False,
+            "meta_description": None,
+            "og_description": None,
+            "page_title": None,
+            "body_snippet": None,
+            "classification": None,
+        }
+
     result: dict = {
         "company_id": index + 1,
         "company_name": name,
@@ -395,10 +420,10 @@ async def process_company(
         result.update(extracted)
 
         # --- Stage 4 ---
-        classification = await stage4_classify(gemini_model, company, extracted)
-        if classification == "DROP_IRRELEVANT":
-            result["drop_reason"] = "classified as IRRELEVANT"
-            result["drop_stage"] = 4
+        classification = await stage4_classify(gemini_model, company, extracted, semaphore)
+        if isinstance(classification, dict) and classification.get("stage") == 4:
+            result["drop_reason"] = classification.get("reason")
+            result["drop_stage"] = classification.get("stage")
             return result
 
         result["classification"] = classification
