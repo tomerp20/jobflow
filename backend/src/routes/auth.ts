@@ -1,8 +1,33 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
+import rateLimit from 'express-rate-limit';
 import authService from '../services/authService';
 import { authenticate } from '../middleware/auth';
 import logger from '../config/logger';
+
+const signupLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { message: 'Too many signup attempts, please try again later.', code: 'ERR_RATE_LIMIT' } },
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { message: 'Too many login attempts, please try again later.', code: 'ERR_RATE_LIMIT' } },
+});
+
+const refreshLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { message: 'Too many token refresh attempts, please try again later.', code: 'ERR_RATE_LIMIT' } },
+});
 
 const router = Router();
 
@@ -42,9 +67,9 @@ function handleValidationErrors(
 }
 
 // ─── POST /api/auth/signup ────────────────────────────────────────────────────
-// TODO: Add rate limiting middleware here (e.g. express-rate-limit, 5 req/min per IP)
 router.post(
   '/signup',
+  signupLimiter,
   [
     body('email')
       .isEmail()
@@ -77,9 +102,9 @@ router.post(
 );
 
 // ─── POST /api/auth/login ─────────────────────────────────────────────────────
-// TODO: Add rate limiting middleware here (e.g. express-rate-limit, 10 req/min per IP)
 router.post(
   '/login',
+  loginLimiter,
   [
     body('email')
       .isEmail()
@@ -129,9 +154,9 @@ router.post(
 );
 
 // ─── POST /api/auth/refresh ───────────────────────────────────────────────────
-// TODO: Add rate limiting middleware here (e.g. express-rate-limit, 10 req/min per IP)
 router.post(
   '/refresh',
+  refreshLimiter,
   [
     body('refreshToken')
       .notEmpty()
