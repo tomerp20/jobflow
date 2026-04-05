@@ -1,41 +1,42 @@
-import { useState, useEffect, useRef } from 'react';
-import { CheckSquare, Trash2, Plus } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { CheckSquare, Trash2, Plus, AlertCircle } from 'lucide-react';
 import { todosApi, cardsApi } from '@/services/api';
+import { TODO_PRIORITY_CONFIG, PRIORITY_ORDER } from '@/utils/todoPriority';
 import type { Todo, Card } from '@/types';
-
-const TODO_PRIORITY_CONFIG: Record<Todo['priority'], { cssClass: string; label: string }> = {
-  urgent: { cssClass: 'priority-critical', label: 'Urgent' },
-  high:   { cssClass: 'priority-high',     label: 'High'   },
-  medium: { cssClass: 'priority-medium',   label: 'Medium' },
-  low:    { cssClass: 'priority-low',      label: 'Low'    },
-};
-
-const PRIORITY_ORDER: Todo['priority'][] = ['urgent', 'high', 'medium', 'low'];
 
 export default function TasksPage() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [newDescription, setNewDescription] = useState('');
   const [adding, setAdding] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    Promise.all([todosApi.getTodos(), cardsApi.getCards({})])
+    Promise.all([todosApi.getTodos(), cardsApi.getCards()])
       .then(([todosData, cardsData]) => {
         setTodos(todosData);
         setCards(cardsData);
       })
-      .catch(console.error)
+      .catch((err) => {
+        console.error(err);
+        setError(true);
+      })
       .finally(() => setLoading(false));
   }, []);
 
-  const cardMap = new Map(cards.map((c) => [c.id, c]));
+  const cardMap = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
 
-  const activeTodos = todos.filter((t) => t.status === 'active');
-  const completedTodos = todos
-    .filter((t) => t.status === 'completed')
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  const activeTodos = useMemo(() => todos.filter((t) => t.status === 'active'), [todos]);
+
+  const completedTodos = useMemo(
+    () =>
+      todos
+        .filter((t) => t.status === 'completed')
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [todos]
+  );
 
   const handleToggle = async (todo: Todo) => {
     const newStatus = todo.status === 'active' ? 'completed' : 'active';
@@ -78,6 +79,15 @@ export default function TasksPage() {
         {[...Array(5)].map((_, i) => (
           <div key={i} className="skeleton h-12 rounded-xl" />
         ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 flex flex-col items-center justify-center gap-3 text-center">
+        <AlertCircle size={32} className="text-red-400" />
+        <p className="text-sm text-gray-500">Failed to load tasks. Please refresh and try again.</p>
       </div>
     );
   }
