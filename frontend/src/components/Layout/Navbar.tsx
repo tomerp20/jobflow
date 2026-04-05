@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { Briefcase, LayoutDashboard, Columns3, LogOut, User } from 'lucide-react';
+import { Briefcase, LayoutDashboard, Columns3, CheckSquare, LogOut, User } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
 export default function Navbar() {
@@ -22,6 +22,7 @@ export default function Navbar() {
   const navItems = [
     { to: '/', label: 'Board', icon: Columns3 },
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   ];
 
   return (
