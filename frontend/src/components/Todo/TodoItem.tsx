@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import { Trash2, Unlink } from 'lucide-react';
 import type { Todo } from '@/types';
 import { todosApi } from '@/services/api';
-import { TODO_PRIORITY_CONFIG } from '@/utils/todoPriority';
+import { TODO_PRIORITY_CONFIG, PRIORITY_ORDER } from '@/utils/todoPriority';
 
 export interface TodoItemProps {
   todo: Todo;
@@ -18,6 +18,16 @@ export default function TodoItem({ todo, onToggleComplete, onUpdate, onDelete, o
   const inputRef = useRef<HTMLInputElement>(null);
   const priority = TODO_PRIORITY_CONFIG[todo.priority];
   const isCompleted = todo.status === 'completed';
+
+  const handlePriorityChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newPriority = e.target.value as Todo['priority'];
+    try {
+      const updated = await todosApi.updateTodo(todo.id, { priority: newPriority });
+      onUpdate(updated);
+    } catch (err) {
+      console.error('Failed to update todo priority:', err);
+    }
+  };
 
   const handleToggleComplete = async () => {
     const newStatus = isCompleted ? 'active' : 'completed';
@@ -91,10 +101,18 @@ export default function TodoItem({ todo, onToggleComplete, onUpdate, onDelete, o
         aria-label={isCompleted ? 'Mark as active' : 'Mark as complete'}
       />
 
-      {/* Priority badge */}
-      <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0 ${priority.cssClass}`}>
-        {priority.label}
-      </span>
+      {/* Priority dropdown */}
+      <select
+        value={todo.priority}
+        onChange={handlePriorityChange}
+        disabled={isCompleted}
+        className={`rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0 cursor-pointer border-0 outline-none appearance-none ${priority.cssClass}`}
+        aria-label="Task priority"
+      >
+        {PRIORITY_ORDER.map((p) => (
+          <option key={p} value={p}>{TODO_PRIORITY_CONFIG[p].label}</option>
+        ))}
+      </select>
 
       {/* Description */}
       <div className="flex-1 min-w-0">

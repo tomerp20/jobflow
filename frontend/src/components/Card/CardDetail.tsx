@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { cardsApi } from '@/services/api';
-import type { Card, CardActivity } from '@/types';
+import { useState, useEffect, useRef } from 'react';
+import { cardsApi, todosApi } from '@/services/api';
+import type { Card, CardActivity, Todo } from '@/types';
 import {
   X,
   Trash2,
@@ -10,9 +10,14 @@ import {
   MessageSquare,
   Send,
   AlertCircle,
+  CheckSquare,
+  Plus,
+  Unlink,
+  Link,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { useAutoResize } from '@/hooks/useAutoResize';
+import { TODO_PRIORITY_CONFIG, PRIORITY_ORDER } from '@/utils/todoPriority';
 
 interface CardDetailProps {
   cardId: string;
@@ -24,6 +29,7 @@ interface CardDetailProps {
 export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: CardDetailProps) {
   const [card, setCard] = useState<Card | null>(null);
   const [activities, setActivities] = useState<CardActivity[]>([]);
+  const [linkedTodos, setLinkedTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editData, setEditData] = useState<Partial<Card>>({});
@@ -31,20 +37,92 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [techStackInput, setTechStackInput] = useState('');
   const [tagsInput, setTagsInput] = useState('');
+  const [newTodoDescription, setNewTodoDescription] = useState('');
+  const [addingTodo, setAddingTodo] = useState(false);
+  const [showLinkPicker, setShowLinkPicker] = useState(false);
+  const [linkSearch, setLinkSearch] = useState('');
+  const [unlinkedTodos, setUnlinkedTodos] = useState<Todo[]>([]);
+  const todoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    cardsApi
-      .getCard(cardId)
-      .then(({ card: c, activities: a }) => {
+    Promise.all([cardsApi.getCard(cardId), todosApi.getTodos({ cardId })])
+      .then(([{ card: c, activities: a }, todos]) => {
         setCard(c);
         setActivities(a);
         setEditData(c);
         setTechStackInput(c.techStack.join(', '));
         setTagsInput(c.tags.join(', '));
+        setLinkedTodos(todos);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [cardId]);
+
+  const handleAddLinkedTodo = async () => {
+    const trimmed = newTodoDescription.trim();
+    if (!trimmed) return;
+    setAddingTodo(true);
+    try {
+      const created = await todosApi.createTodo({ description: trimmed, priority: 'medium', cardId });
+      setLinkedTodos((prev) => [created, ...prev]);
+      setNewTodoDescription('');
+      todoInputRef.current?.focus();
+    } catch (err) {
+      console.error('Failed to create linked todo:', err);
+    } finally {
+      setAddingTodo(false);
+    }
+  };
+
+  const handleToggleTodo = async (todo: Todo) => {
+    const newStatus = todo.status === 'active' ? 'completed' : 'active';
+    try {
+      const updated = await todosApi.updateTodo(todo.id, { status: newStatus });
+      setLinkedTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    } catch (err) {
+      console.error('Failed to toggle todo:', err);
+    }
+  };
+
+  const handleTodoPriorityChange = async (todo: Todo, priority: Todo['priority']) => {
+    try {
+      const updated = await todosApi.updateTodo(todo.id, { priority });
+      setLinkedTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    } catch (err) {
+      console.error('Failed to update todo priority:', err);
+    }
+  };
+
+  const handleUnlinkTodo = async (todo: Todo) => {
+    try {
+      await todosApi.updateTodo(todo.id, { cardId: null });
+      setLinkedTodos((prev) => prev.filter((t) => t.id !== todo.id));
+    } catch (err) {
+      console.error('Failed to unlink todo:', err);
+    }
+  };
+
+  const handleOpenLinkPicker = async () => {
+    setShowLinkPicker(true);
+    setLinkSearch('');
+    try {
+      const all = await todosApi.getTodos({ status: 'active' });
+      setUnlinkedTodos(all.filter((t) => t.cardId === null));
+    } catch (err) {
+      console.error('Failed to fetch unlinked todos:', err);
+    }
+  };
+
+  const handleLinkExisting = async (todo: Todo) => {
+    try {
+      const updated = await todosApi.updateTodo(todo.id, { cardId });
+      setLinkedTodos((prev) => [updated, ...prev]);
+      setUnlinkedTodos((prev) => prev.filter((t) => t.id !== todo.id));
+      setShowLinkPicker(false);
+    } catch (err) {
+      console.error('Failed to link todo:', err);
+    }
+  };
 
   const handleSave = async () => {
     if (!card) return;
@@ -110,6 +188,11 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
   }
 
   if (!card) return null;
+
+  const activeTodoCount = linkedTodos.filter((t) => t.status === 'active').length;
+  const filteredUnlinked = unlinkedTodos.filter((t) =>
+    t.description.toLowerCase().includes(linkSearch.toLowerCase())
+  );
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -476,6 +559,141 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
               {activities.length === 0 && (
                 <p className="text-sm text-gray-400 text-center py-4">No activity yet</p>
               )}
+            </div>
+          </div>
+
+          {/* Linked Tasks */}
+          <div className="border-t border-gray-200 pt-5">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <CheckSquare size={14} />
+              Tasks
+              {activeTodoCount > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 rounded-full bg-primary-100 text-primary-700 text-[11px] font-semibold px-1.5">
+                  {activeTodoCount}
+                </span>
+              )}
+            </h3>
+
+            {/* Add new task */}
+            <div className="flex gap-2 mb-2">
+              <input
+                ref={todoInputRef}
+                type="text"
+                value={newTodoDescription}
+                onChange={(e) => setNewTodoDescription(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddLinkedTodo()}
+                placeholder="Add a task for this card..."
+                className="input-field flex-1 text-sm"
+                disabled={addingTodo}
+              />
+              <button
+                onClick={handleAddLinkedTodo}
+                disabled={addingTodo || !newTodoDescription.trim()}
+                className="rounded-lg bg-gray-100 px-3 text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition disabled:opacity-40"
+                aria-label="Add task"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+
+            {/* Link existing task */}
+            <div className="mb-3 relative">
+              {!showLinkPicker ? (
+                <button
+                  onClick={handleOpenLinkPicker}
+                  className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-primary-600 transition"
+                >
+                  <Link size={11} />
+                  Link existing task
+                </button>
+              ) : (
+                <div className="border border-gray-200 rounded-lg bg-white shadow-sm">
+                  <div className="flex items-center gap-2 px-2 py-1.5 border-b border-gray-100">
+                    <input
+                      autoFocus
+                      type="text"
+                      value={linkSearch}
+                      onChange={(e) => setLinkSearch(e.target.value)}
+                      placeholder="Search tasks..."
+                      className="flex-1 text-sm outline-none text-gray-700"
+                    />
+                    <button
+                      onClick={() => setShowLinkPicker(false)}
+                      className="text-gray-400 hover:text-gray-600 text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="max-h-40 overflow-y-auto">
+                    {filteredUnlinked.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center py-3">No unlinked tasks found</p>
+                    ) : (
+                      filteredUnlinked.map((todo) => (
+                        <button
+                          key={todo.id}
+                          onClick={() => handleLinkExisting(todo)}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 transition"
+                        >
+                          <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0 ${TODO_PRIORITY_CONFIG[todo.priority].cssClass}`}>
+                            {TODO_PRIORITY_CONFIG[todo.priority].label}
+                          </span>
+                          <span className="truncate text-gray-700">{todo.description}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Todo list */}
+            <div className="space-y-1">
+              {linkedTodos.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-3">No tasks linked to this card.</p>
+              )}
+              {linkedTodos.map((todo) => (
+                <div
+                  key={todo.id}
+                  className={`flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 group ${
+                    todo.status === 'completed' ? 'opacity-60' : ''
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={todo.status === 'completed'}
+                    onChange={() => handleToggleTodo(todo)}
+                    className="w-4 h-4 shrink-0 cursor-pointer accent-primary-600"
+                    aria-label={todo.status === 'completed' ? 'Mark as active' : 'Mark as complete'}
+                  />
+                  <select
+                    value={todo.priority}
+                    onChange={(e) => handleTodoPriorityChange(todo, e.target.value as Todo['priority'])}
+                    disabled={todo.status === 'completed'}
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0 cursor-pointer border-0 outline-none appearance-none ${TODO_PRIORITY_CONFIG[todo.priority].cssClass}`}
+                    aria-label="Task priority"
+                  >
+                    {PRIORITY_ORDER.map((p) => (
+                      <option key={p} value={p}>{TODO_PRIORITY_CONFIG[p].label}</option>
+                    ))}
+                  </select>
+                  <span
+                    className={`flex-1 text-sm min-w-0 truncate ${
+                      todo.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-800'
+                    }`}
+                    title={todo.description}
+                  >
+                    {todo.description}
+                  </span>
+                  <button
+                    onClick={() => handleUnlinkTodo(todo)}
+                    className="p-1 rounded text-gray-300 hover:text-amber-500 hover:bg-amber-50 transition opacity-0 group-hover:opacity-100 shrink-0"
+                    aria-label="Unlink task from card"
+                    title="Unlink from card"
+                  >
+                    <Unlink size={12} />
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
         </div>
