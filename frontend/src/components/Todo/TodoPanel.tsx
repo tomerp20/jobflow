@@ -1,8 +1,71 @@
-import { useState, useRef, type JSX } from 'react';
-import { CheckSquare, ChevronDown } from 'lucide-react';
+import { useState, useRef, useCallback, type JSX } from 'react';
+import { CheckSquare, ChevronDown, GripVertical } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+  sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type { Todo } from '@/types';
 import { todosApi } from '@/services/api';
 import TodoItem from './TodoItem';
+
+// Thin wrapper that adds a drag handle to each TodoItem
+function SortableTodoItem({
+  todo,
+  onToggleComplete,
+  onUpdate,
+  onDelete,
+}: {
+  todo: Todo;
+  onToggleComplete: (updated: Todo) => void;
+  onUpdate: (updated: Todo) => void;
+  onDelete: (id: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: todo.id,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+      }}
+      className="flex items-center gap-1"
+    >
+      <button
+        className="p-1 cursor-grab text-gray-300 hover:text-gray-500 shrink-0 touch-none"
+        aria-label="Drag to reorder"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={14} />
+      </button>
+      <div className="flex-1 min-w-0">
+        <TodoItem
+          todo={todo}
+          onToggleComplete={onToggleComplete}
+          onUpdate={onUpdate}
+          onDelete={onDelete}
+        />
+      </div>
+    </div>
+  );
+}
 
 export default function TodoPanel(): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
@@ -14,6 +77,13 @@ export default function TodoPanel(): JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const activeTodos = todos.filter((t) => t.status === 'active');
+
+  // Register both pointer and keyboard sensors so drag-to-reorder is
+  // accessible to keyboard-only users (WCAG 2.1 SC 2.1.1)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   const handleToggle = async () => {
     const opening = !isOpen;
@@ -56,6 +126,56 @@ export default function TodoPanel(): JSX.Element {
     }
   };
 
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = activeTodos.findIndex((t) => t.id === active.id);
+    const newIndex = activeTodos.findIndex((t) => t.id === over.id);
+    const reordered = arrayMove(activeTodos, oldIndex, newIndex);
+
+    // Optimistic update — merge reordered active todos back with non-active ones
+    setTodos((prev) => {
+      const nonActive = prev.filter((t) => t.status !== 'active');
+      return [...reordered, ...nonActive];
+    });
+
+    try {
+      const updated = await todosApi.reorderTodos(reordered.map((t) => t.id));
+      // Replace with authoritative state from backend
+      setTodos((prev) => {
+        const nonActive = prev.filter((t) => t.status !== 'active');
+        return [...updated, ...nonActive];
+      });
+    } catch (err) {
+      console.error('Failed to reorder todos:', err);
+      // Rollback: re-fetch to restore server order
+      todosApi
+        .getTodos({ status: 'active' })
+        .then((data) =>
+          setTodos((prev) => {
+            const nonActive = prev.filter((t) => t.status !== 'active');
+            return [...data, ...nonActive];
+          })
+        )
+        .catch((rollbackErr) => {
+          console.error('Failed to roll back todo order after reorder failure:', rollbackErr);
+        });
+    }
+  };
+
+  // Stable callbacks so SortableTodoItem does not re-render on every parent render
+  const handleTodoUpdate = useCallback(
+    (updated: Todo) =>
+      setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t))),
+    []
+  );
+
+  const handleTodoDelete = useCallback(
+    (id: string) => setTodos((prev) => prev.filter((t) => t.id !== id)),
+    []
+  );
+
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
       {/* Header — always visible */}
@@ -68,14 +188,15 @@ export default function TodoPanel(): JSX.Element {
         <div className="flex items-center gap-2">
           <CheckSquare size={16} className="text-primary-600 shrink-0" />
           <span className="text-sm font-semibold text-gray-800">Tasks</span>
-          {activeTodos.length > 0 && (
-            <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 rounded-full bg-primary-100 text-primary-700 text-[11px] font-semibold px-1.5">
+          {(hasFetched || activeTodos.length > 0) && (
+            <span
+              className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 rounded-full text-[11px] font-semibold px-1.5 ${
+                activeTodos.length > 0
+                  ? 'bg-primary-100 text-primary-700'
+                  : 'bg-gray-100 text-gray-500'
+              }`}
+            >
               {activeTodos.length}
-            </span>
-          )}
-          {hasFetched && activeTodos.length === 0 && (
-            <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 rounded-full bg-gray-100 text-gray-500 text-[11px] font-semibold px-1.5">
-              0
             </span>
           )}
         </div>
@@ -95,7 +216,6 @@ export default function TodoPanel(): JSX.Element {
           maxHeight: isOpen ? '500px' : '0',
           opacity: isOpen ? 1 : 0,
           overflow: 'hidden',
-          padding: isOpen ? undefined : '0',
           transition: 'max-height 0.3s ease-in-out, opacity 0.2s ease-in-out',
         }}
       >
@@ -128,21 +248,28 @@ export default function TodoPanel(): JSX.Element {
           ) : activeTodos.length === 0 ? (
             <p className="py-3 text-center text-sm text-gray-400">No active tasks. Add one above.</p>
           ) : (
-            <div className="space-y-0.5">
-              {activeTodos.map((todo) => (
-                <TodoItem
-                  key={todo.id}
-                  todo={todo}
-                  onToggleComplete={(updated) =>
-                    setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                  }
-                  onUpdate={(updated) =>
-                    setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-                  }
-                  onDelete={(id) => setTodos((prev) => prev.filter((t) => t.id !== id))}
-                />
-              ))}
-            </div>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={activeTodos.map((t) => t.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="space-y-0.5">
+                  {activeTodos.map((todo) => (
+                    <SortableTodoItem
+                      key={todo.id}
+                      todo={todo}
+                      onToggleComplete={handleTodoUpdate}
+                      onUpdate={handleTodoUpdate}
+                      onDelete={handleTodoDelete}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
           )}
         </div>
       </div>
