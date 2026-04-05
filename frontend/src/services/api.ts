@@ -179,6 +179,7 @@ export const cardsApi = {
   },
 };
 
+// Todos API
 // Todos API — backend returns { data: ... } with snake_case fields
 export const todosApi = {
   getTodos: async (filters?: { cardId?: string; status?: 'active' | 'completed' }): Promise<Todo[]> => {
