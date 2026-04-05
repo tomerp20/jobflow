@@ -65,3 +65,15 @@ export interface CardFilters {
   workMode?: string;
   tags?: string[];
 }
+
+export interface Todo {
+  id: string;
+  userId: string;
+  cardId: string | null;
+  description: string;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  status: 'active' | 'completed';
+  position: number | null;
+  createdAt: string;
+  updatedAt: string;
+}

@@ -7,6 +7,7 @@ import ReminderBanner from '@/components/Reminders/ReminderBanner';
 import CardDetail from '@/components/Card/CardDetail';
 import CardForm from '@/components/Card/CardForm';
 import StageForm from '@/components/Board/StageForm';
+import TodoPanel from '@/components/Todo/TodoPanel';
 
 export default function BoardPage() {
   const [stages, setStages] = useState<Stage[]>([]);
@@ -148,6 +149,9 @@ export default function BoardPage() {
     <div className="flex flex-col h-full">
       <ReminderBanner />
       <SearchBar filters={filters} onFiltersChange={setFilters} stages={stages} />
+      <div className="px-4 mb-4">
+        <TodoPanel />
+      </div>
       <div className="flex-1 overflow-hidden px-4 pb-4">
         <Board
           stages={stages}
