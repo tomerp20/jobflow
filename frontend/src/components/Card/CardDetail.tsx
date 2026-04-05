@@ -43,6 +43,7 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
   const [linkSearch, setLinkSearch] = useState('');
   const [unlinkedTodos, setUnlinkedTodos] = useState<Todo[]>([]);
   const todoInputRef = useRef<HTMLInputElement>(null);
+  const linkingTodoRef = useRef<string | null>(null);
 
   useEffect(() => {
     Promise.all([cardsApi.getCard(cardId), todosApi.getTodos({ cardId })])
@@ -105,6 +106,7 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
   const handleOpenLinkPicker = async () => {
     setShowLinkPicker(true);
     setLinkSearch('');
+    setUnlinkedTodos([]); // clear stale data immediately so re-opens never show old entries
     try {
       const all = await todosApi.getTodos({ status: 'active' });
       setUnlinkedTodos(all.filter((t) => t.cardId === null));
@@ -114,6 +116,8 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
   };
 
   const handleLinkExisting = async (todo: Todo) => {
+    if (linkingTodoRef.current === todo.id) return;
+    linkingTodoRef.current = todo.id;
     try {
       const updated = await todosApi.updateTodo(todo.id, { cardId });
       setLinkedTodos((prev) => [updated, ...prev]);
@@ -121,6 +125,8 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
       setShowLinkPicker(false);
     } catch (err) {
       console.error('Failed to link todo:', err);
+    } finally {
+      linkingTodoRef.current = null;
     }
   };
 
@@ -619,9 +625,10 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
                     />
                     <button
                       onClick={() => setShowLinkPicker(false)}
-                      className="text-gray-400 hover:text-gray-600 text-xs"
+                      className="text-gray-400 hover:text-gray-600"
+                      aria-label="Close picker"
                     >
-                      ✕
+                      <X size={12} />
                     </button>
                   </div>
                   <div className="max-h-40 overflow-y-auto">

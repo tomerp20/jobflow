@@ -15,17 +15,21 @@ export interface TodoItemProps {
 export default function TodoItem({ todo, onToggleComplete, onUpdate, onDelete, onUnlink }: TodoItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(todo.description);
+  const [updatingPriority, setUpdatingPriority] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const priority = TODO_PRIORITY_CONFIG[todo.priority];
   const isCompleted = todo.status === 'completed';
 
   const handlePriorityChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newPriority = e.target.value as Todo['priority'];
+    setUpdatingPriority(true);
     try {
       const updated = await todosApi.updateTodo(todo.id, { priority: newPriority });
       onUpdate(updated);
     } catch (err) {
       console.error('Failed to update todo priority:', err);
+    } finally {
+      setUpdatingPriority(false);
     }
   };
 
@@ -105,7 +109,7 @@ export default function TodoItem({ todo, onToggleComplete, onUpdate, onDelete, o
       <select
         value={todo.priority}
         onChange={handlePriorityChange}
-        disabled={isCompleted}
+        disabled={isCompleted || updatingPriority}
         className={`rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0 cursor-pointer border-0 outline-none appearance-none ${priority.cssClass}`}
         aria-label="Task priority"
       >
