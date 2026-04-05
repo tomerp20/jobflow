@@ -14,15 +14,9 @@ import {
   Plus,
   Unlink,
 } from 'lucide-react';
-
-const TODO_PRIORITY_CONFIG: Record<Todo['priority'], { cssClass: string; label: string }> = {
-  urgent: { cssClass: 'priority-critical', label: 'Urgent' },
-  high:   { cssClass: 'priority-high',     label: 'High'   },
-  medium: { cssClass: 'priority-medium',   label: 'Medium' },
-  low:    { cssClass: 'priority-low',      label: 'Low'    },
-};
 import { format, parseISO } from 'date-fns';
 import { useAutoResize } from '@/hooks/useAutoResize';
+import { TODO_PRIORITY_CONFIG } from '@/utils/todoPriority';
 
 interface CardDetailProps {
   cardId: string;
@@ -76,6 +70,25 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
       console.error('Failed to create linked todo:', err);
     } finally {
       setAddingTodo(false);
+    }
+  };
+
+  const handleToggleTodo = async (todo: Todo) => {
+    const newStatus = todo.status === 'active' ? 'completed' : 'active';
+    try {
+      const updated = await todosApi.updateTodo(todo.id, { status: newStatus });
+      setLinkedTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    } catch (err) {
+      console.error('Failed to toggle todo:', err);
+    }
+  };
+
+  const handleUnlinkTodo = async (todo: Todo) => {
+    try {
+      const updated = await todosApi.updateTodo(todo.id, { cardId: null });
+      setLinkedTodos((prev) => prev.filter((t) => t.id !== updated.id));
+    } catch (err) {
+      console.error('Failed to unlink todo:', err);
     }
   };
 
@@ -143,6 +156,8 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
   }
 
   if (!card) return null;
+
+  const activeTodoCount = linkedTodos.filter((t) => t.status === 'active').length;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -517,9 +532,9 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
             <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
               <CheckSquare size={14} />
               Tasks
-              {linkedTodos.filter((t) => t.status === 'active').length > 0 && (
+              {activeTodoCount > 0 && (
                 <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 rounded-full bg-primary-100 text-primary-700 text-[11px] font-semibold px-1.5">
-                  {linkedTodos.filter((t) => t.status === 'active').length}
+                  {activeTodoCount}
                 </span>
               )}
             </h3>
@@ -561,15 +576,7 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
                   <input
                     type="checkbox"
                     checked={todo.status === 'completed'}
-                    onChange={async () => {
-                      const newStatus = todo.status === 'active' ? 'completed' : 'active';
-                      try {
-                        const updated = await todosApi.updateTodo(todo.id, { status: newStatus });
-                        setLinkedTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-                      } catch (err) {
-                        console.error('Failed to toggle todo:', err);
-                      }
-                    }}
+                    onChange={() => handleToggleTodo(todo)}
                     className="w-4 h-4 shrink-0 cursor-pointer accent-primary-600"
                   />
                   <span
@@ -586,14 +593,7 @@ export default function CardDetail({ cardId, onClose, onUpdated, onDeleted }: Ca
                     {todo.description}
                   </span>
                   <button
-                    onClick={async () => {
-                      try {
-                        const updated = await todosApi.updateTodo(todo.id, { cardId: null });
-                        setLinkedTodos((prev) => prev.filter((t) => t.id !== updated.id));
-                      } catch (err) {
-                        console.error('Failed to unlink todo:', err);
-                      }
-                    }}
+                    onClick={() => handleUnlinkTodo(todo)}
                     className="p-1 rounded text-gray-300 hover:text-amber-500 hover:bg-amber-50 transition opacity-0 group-hover:opacity-100 shrink-0"
                     aria-label="Unlink task from card"
                     title="Unlink from card"
