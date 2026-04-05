@@ -178,11 +178,12 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
           <button
             type="button"
             onClick={() => setShowMore((v) => !v)}
+            aria-expanded={showMore}
             className="flex items-center gap-1 text-sm text-primary-600 hover:text-primary-700 font-medium"
           >
             <ChevronDown
               size={16}
-              className={showMore ? 'rotate-180 transition-transform' : 'transition-transform'}
+              className={`transition-transform${showMore ? ' rotate-180' : ''}`}
             />
             {showMore ? 'Show fewer fields' : 'Show more fields'}
           </button>
