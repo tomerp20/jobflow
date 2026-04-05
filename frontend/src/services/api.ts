@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Card, CardActivity, CardFilters, DashboardData, Stage, User } from '@/types';
+import type { Card, CardActivity, CardFilters, DashboardData, Stage, Todo, User } from '@/types';
 import { snakeToCamel, camelToSnake } from '@/utils/caseTransform';
 
 const api = axios.create({
@@ -176,6 +176,33 @@ export const cardsApi = {
   addNote: async (id: string, note: string): Promise<CardActivity> => {
     const res = await api.post(`/cards/${id}/notes`, { note });
     return snakeToCamel(res.data.data) as CardActivity;
+  },
+};
+
+// Todos API — backend returns { data: ... } with snake_case fields
+export const todosApi = {
+  getTodos: async (filters?: { cardId?: string; status?: 'active' | 'completed' }): Promise<Todo[]> => {
+    const params = new URLSearchParams();
+    if (filters?.cardId) params.set('card_id', filters.cardId);
+    if (filters?.status) params.set('status', filters.status);
+    const query = params.toString();
+    const res = await api.get(`/todos${query ? `?${query}` : ''}`);
+    return snakeToCamel(res.data.data) as Todo[];
+  },
+  createTodo: async (data: { description: string; priority?: Todo['priority']; cardId?: string | null }): Promise<Todo> => {
+    const res = await api.post('/todos', camelToSnake(data));
+    return snakeToCamel(res.data.data) as Todo;
+  },
+  updateTodo: async (id: string, data: Partial<Pick<Todo, 'description' | 'priority' | 'status' | 'cardId'>>): Promise<Todo> => {
+    const res = await api.patch(`/todos/${id}`, camelToSnake(data));
+    return snakeToCamel(res.data.data) as Todo;
+  },
+  deleteTodo: async (id: string): Promise<void> => {
+    await api.delete(`/todos/${id}`);
+  },
+  reorderTodos: async (orderedIds: string[]): Promise<Todo[]> => {
+    const res = await api.patch('/todos/reorder', { ordered_ids: orderedIds });
+    return snakeToCamel(res.data.data) as Todo[];
   },
 };
 
