@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { body, query } from 'express-validator';
+import { body, query, param } from 'express-validator';
 import { authenticate } from '../middleware/auth';
 import { validate } from '../middleware/validate';
 import { todoService } from '../services/todoService';
@@ -79,6 +79,7 @@ router.patch(
   '/:id',
   authenticate,
   validate([
+    param('id').isUUID().withMessage('id must be a valid UUID'),
     body('description').optional().isString().trim().notEmpty(),
     body('priority').optional().isIn(VALID_PRIORITIES).withMessage('Invalid priority'),
     body('status').optional().isIn(['active', 'completed']).withMessage('Invalid status'),
@@ -99,6 +100,9 @@ router.patch(
 router.delete(
   '/:id',
   authenticate,
+  validate([
+    param('id').isUUID().withMessage('id must be a valid UUID'),
+  ]),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.id;

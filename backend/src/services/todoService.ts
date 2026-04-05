@@ -39,10 +39,10 @@ export const todoService = {
     userId: string,
     filters: { card_id?: string; status?: string } = {}
   ): Promise<Todo[]> {
-    const query = db('todo_items').where({ user_id: userId });
-    if (filters.card_id) query.where({ card_id: filters.card_id });
-    if (filters.status)  query.where({ status: filters.status });
-    query.orderByRaw(`
+    let query = db('todo_items').where({ user_id: userId });
+    if (filters.card_id) query = query.where({ card_id: filters.card_id });
+    if (filters.status)  query = query.where({ status: filters.status });
+    query = query.orderByRaw(`
       CASE priority
         WHEN 'urgent' THEN 1
         WHEN 'high'   THEN 2
@@ -87,33 +87,42 @@ export const todoService = {
   async reorderTodos(userId: string, orderedIds: string[]): Promise<Todo[]> {
     // Fetch current todos to seed the priority map
     const todos: Todo[] = await db('todo_items').where({ user_id: userId });
+    const ownedIds = new Set(todos.map(t => t.id));
     const originalPriority = new Map(todos.map(t => [t.id, t.priority]));
+
+    // Reject any IDs that don't belong to the requesting user
+    const unknown = orderedIds.filter(id => !ownedIds.has(id));
+    if (unknown.length > 0) {
+      throw new AppError('One or more todo IDs not found', 404, 'ERR_NOT_FOUND');
+    }
 
     // Track inferred priorities as we assign them so each item can inherit
     // the already-computed priority of the item directly above it.
     const inferredPriority = new Map<string, Todo['priority']>();
 
-    for (let i = 0; i < orderedIds.length; i++) {
-      const id = orderedIds[i];
-      let priority: Todo['priority'];
+    await db.transaction(async (trx) => {
+      for (let i = 0; i < orderedIds.length; i++) {
+        const id = orderedIds[i];
+        let priority: Todo['priority'];
 
-      if (i === 0) {
-        // First item: inherit from the item below it (or keep original if only one)
-        const belowId = orderedIds.length > 1 ? orderedIds[1] : null;
-        priority = belowId
-          ? (originalPriority.get(belowId) ?? 'medium')
-          : (originalPriority.get(id) ?? 'medium');
-      } else {
-        // Every other item inherits the already-inferred priority of the item above
-        priority = inferredPriority.get(orderedIds[i - 1]) ?? 'medium';
+        if (i === 0) {
+          // First item: inherit from the item below it (or keep original if only one)
+          const belowId = orderedIds.length > 1 ? orderedIds[1] : null;
+          priority = belowId
+            ? (originalPriority.get(belowId) ?? 'medium')
+            : (originalPriority.get(id) ?? 'medium');
+        } else {
+          // Every other item inherits the already-inferred priority of the item above
+          priority = inferredPriority.get(orderedIds[i - 1]) ?? 'medium';
+        }
+
+        inferredPriority.set(id, priority);
+
+        await trx('todo_items')
+          .where({ id, user_id: userId })
+          .update({ position: i, priority, updated_at: trx.fn.now() });
       }
-
-      inferredPriority.set(id, priority);
-
-      await db('todo_items')
-        .where({ id, user_id: userId })
-        .update({ position: i, priority, updated_at: db.fn.now() });
-    }
+    });
 
     return db('todo_items')
       .where({ user_id: userId })
