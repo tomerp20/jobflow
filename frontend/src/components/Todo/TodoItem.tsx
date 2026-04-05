@@ -2,13 +2,7 @@ import { useState, useRef } from 'react';
 import { Trash2, Unlink } from 'lucide-react';
 import type { Todo } from '@/types';
 import { todosApi } from '@/services/api';
-
-const TODO_PRIORITY_CONFIG: Record<Todo['priority'], { cssClass: string; label: string }> = {
-  urgent: { cssClass: 'priority-critical', label: 'Urgent' },
-  high:   { cssClass: 'priority-high',     label: 'High'   },
-  medium: { cssClass: 'priority-medium',   label: 'Medium' },
-  low:    { cssClass: 'priority-low',      label: 'Low'    },
-};
+import { TODO_PRIORITY_CONFIG } from '@/utils/todoPriority';
 
 export interface TodoItemProps {
   todo: Todo;
@@ -21,7 +15,6 @@ export interface TodoItemProps {
 export default function TodoItem({ todo, onToggleComplete, onUpdate, onDelete, onUnlink }: TodoItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(todo.description);
-  const [isHovered, setIsHovered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const priority = TODO_PRIORITY_CONFIG[todo.priority];
   const isCompleted = todo.status === 'completed';
@@ -88,11 +81,7 @@ export default function TodoItem({ todo, onToggleComplete, onUpdate, onDelete, o
   };
 
   return (
-    <div
-      className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 group"
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
+    <div className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 group">
       {/* Checkbox */}
       <input
         type="checkbox"
@@ -132,7 +121,7 @@ export default function TodoItem({ todo, onToggleComplete, onUpdate, onDelete, o
         )}
       </div>
 
-      {/* Linked-to-card chip or unlink button */}
+      {/* Linked-to-card "T" chip */}
       {todo.cardId !== null && !onUnlink && (
         <span
           className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold shrink-0"
@@ -142,29 +131,27 @@ export default function TodoItem({ todo, onToggleComplete, onUpdate, onDelete, o
         </span>
       )}
 
-      {/* Action buttons — shown on hover */}
-      {isHovered && (
-        <div className="flex items-center gap-1 shrink-0">
-          {onUnlink && todo.cardId !== null && (
-            <button
-              onClick={handleUnlink}
-              className="p-1 rounded text-gray-400 hover:text-amber-500 hover:bg-amber-50 transition"
-              aria-label="Unlink from card"
-              title="Unlink from card"
-            >
-              <Unlink size={13} />
-            </button>
-          )}
+      {/* Action buttons — CSS group-hover for zero re-renders */}
+      <div className="flex items-center gap-1 shrink-0">
+        {onUnlink && todo.cardId !== null && (
           <button
-            onClick={handleDelete}
-            className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition"
-            aria-label="Delete task"
-            title="Delete task"
+            onClick={handleUnlink}
+            className="p-1 rounded text-gray-400 hover:text-amber-500 hover:bg-amber-50 transition opacity-0 group-hover:opacity-100"
+            aria-label="Unlink from card"
+            title="Unlink from card"
           >
-            <Trash2 size={13} />
+            <Unlink size={13} />
           </button>
-        </div>
-      )}
+        )}
+        <button
+          onClick={handleDelete}
+          className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition opacity-0 group-hover:opacity-100"
+          aria-label="Delete task"
+          title="Delete task"
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
     </div>
   );
 }
