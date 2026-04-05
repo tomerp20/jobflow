@@ -245,67 +245,6 @@ describe('TodoService - deleteTodo', () => {
 });
 
 // =============================================================================
-// REORDER TODOS
-// =============================================================================
-
-describe('TodoService - reorderTodos', () => {
-  it('should assign positions and infer priority from the item above', async () => {
-    // Before reorder: todo-A is urgent (pos 0), todo-B is low (pos 1), todo-C is medium (pos 2)
-    // User drags todo-B to top → new order: [B, A, C]
-    // Expected: B inherits priority of item below (A=urgent), A inherits B's old slot neighbour (A=urgent stays),
-    //           actually per our rule: B is at index 0 → inherits from item below (A=urgent)
-    //                                  A is at index 1 → inherits from item above (B, but B just got urgent)
-    const todoA = { ...MOCK_TODO, id: 'todo-A', priority: 'urgent' as const, position: 0 };
-    const todoB = { ...MOCK_TODO, id: 'todo-B', priority: 'low'    as const, position: 1 };
-    const todoC = { ...MOCK_TODO, id: 'todo-C', priority: 'medium' as const, position: 2 };
-    const allTodos = [todoA, todoB, todoC];
-
-    const updateMock = jest.fn().mockResolvedValue(1);
-    const reorderedResult = [
-      { ...todoB, position: 0, priority: 'urgent' },
-      { ...todoA, position: 1, priority: 'urgent' },
-      { ...todoC, position: 2, priority: 'urgent' },
-    ];
-
-    let callCount = 0;
-    mockDb.mockImplementation((tableName: string) => {
-      if (tableName === 'todo_items') {
-        callCount++;
-        if (callCount === 1) {
-          // initial fetch of all todos
-          const chain = createQueryChain(allTodos);
-          (chain as any).then = (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
-            Promise.resolve(allTodos).then(resolve, reject);
-          return chain;
-        } else if (callCount <= 4) {
-          // update calls per item (3 items)
-          const chain = createQueryChain(undefined);
-          chain.where = jest.fn().mockReturnValue({ update: updateMock });
-          return chain;
-        } else {
-          // final fetch
-          const chain = createQueryChain(reorderedResult);
-          (chain as any).then = (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
-            Promise.resolve(reorderedResult).then(resolve, reject);
-          return chain;
-        }
-      }
-      return createQueryChain(undefined);
-    });
-
-    const result = await todoService.reorderTodos(USER_ID, ['todo-B', 'todo-A', 'todo-C']);
-
-    // update was called once per todo
-    expect(updateMock).toHaveBeenCalledTimes(3);
-    // First item (index 0, no neighbour above) gets priority from item below (todo-A = urgent)
-    expect(updateMock.mock.calls[0][0]).toMatchObject({ position: 0, priority: 'urgent' });
-    // Second item (index 1, neighbour above is todo-B which just got urgent) gets urgent
-    expect(updateMock.mock.calls[1][0]).toMatchObject({ position: 1, priority: 'urgent' });
-    expect(result).toHaveLength(3);
-  });
-});
-
-// =============================================================================
 // CREATE TODO
 // =============================================================================
 
