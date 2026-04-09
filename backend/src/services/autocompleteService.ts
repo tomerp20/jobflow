@@ -9,8 +9,9 @@ export interface WordEntry {
 
 // Load the Hebrew dictionary once at module load time (singleton).
 // Repeated JSON.parse of a 5MB file on every request would degrade performance under load.
+// postbuild copies src/data → dist/data so __dirname resolves correctly in both dev and prod.
 const dictionaryPath = path.join(__dirname, '../data/hebrew-words.json');
-let hebrewWords: WordEntry[];
+let hebrewWords: WordEntry[] | null = null;
 
 try {
   const raw: string[] = JSON.parse(fs.readFileSync(dictionaryPath, 'utf-8'));
@@ -18,11 +19,11 @@ try {
   logger.info('Hebrew dictionary loaded', { wordCount: hebrewWords.length });
 } catch (err) {
   logger.error('Failed to load Hebrew dictionary', { error: (err as Error).message });
-  hebrewWords = [];
 }
 
 export const autocompleteService = {
-  getWords(): WordEntry[] {
+  /** Returns the loaded word list, or null if the dictionary failed to load at startup. */
+  getWords(): WordEntry[] | null {
     return hebrewWords;
   },
 };
