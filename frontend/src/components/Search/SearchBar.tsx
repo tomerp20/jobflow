@@ -28,6 +28,7 @@ export default function SearchBar({ filters, onFiltersChange, stages }: SearchBa
   }, [searchText]);
 
   useEffect(() => {
+    if (!searchText) return;
     query(searchText);
   }, [searchText, query]);
 
@@ -52,6 +53,7 @@ export default function SearchBar({ filters, onFiltersChange, stages }: SearchBa
 
   const clearFilters = () => {
     setSearchText('');
+    setInputFocused(false);
     onFiltersChange({});
   };
 
@@ -69,6 +71,10 @@ export default function SearchBar({ filters, onFiltersChange, stages }: SearchBa
               setInputFocused(true);
               triggerInit();
             }}
+            // Note: onBlur unconditionally hides the dropdown. Tab-key navigation
+            // from the input to a suggestion button will not work because blur fires
+            // before the button receives focus. A relatedTarget check is needed for
+            // full keyboard accessibility if that use case is added in the future.
             onBlur={() => setInputFocused(false)}
             placeholder="Search companies, roles, tech stack..."
             className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-8 text-sm transition focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
