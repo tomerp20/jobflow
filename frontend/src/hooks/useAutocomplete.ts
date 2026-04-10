@@ -1,6 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import trieWorker from '@/workers/trieWorker';
 
+// Sequence counter shared across all instances so each query can be
+// matched back to the instance that issued it.
+let globalSeq = 0;
+
 interface UseAutocompleteResult {
   suggestions: string[];
   isLoading: boolean;
@@ -13,24 +17,36 @@ export function useAutocomplete(): UseAutocompleteResult {
   const [isLoading, setIsLoading] = useState(false);
 
   const initializedRef = useRef(false);
+  const isReadyRef = useRef(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The seq number this instance assigned to its most recent query.
+  const lastSeqRef = useRef<number>(-1);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const data = event.data as
         | { type: 'ready' }
-        | { type: 'results'; suggestions: string[] };
+        | { type: 'results'; suggestions: string[]; seq: number };
 
       if (data.type === 'ready') {
+        isReadyRef.current = true;
         setIsLoading(false);
       } else if (data.type === 'results') {
-        setSuggestions(data.suggestions);
+        // Only accept results that this instance requested.
+        if (data.seq === lastSeqRef.current) {
+          setSuggestions(data.suggestions);
+        }
       }
     };
 
     trieWorker.addEventListener('message', handleMessage);
     return () => {
       trieWorker.removeEventListener('message', handleMessage);
+      // Cancel any pending debounce to avoid posting to the worker after unmount.
+      if (debounceTimerRef.current !== null) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -39,7 +55,8 @@ export function useAutocomplete(): UseAutocompleteResult {
     initializedRef.current = true;
     setIsLoading(true);
 
-    fetch('/api/autocomplete/words')
+    const baseUrl = import.meta.env.VITE_API_URL ?? '/api';
+    fetch(`${baseUrl}/autocomplete/words`)
       .then((res) => {
         if (!res.ok) {
           throw new Error(`Failed to fetch words: ${res.status}`);
@@ -56,12 +73,17 @@ export function useAutocomplete(): UseAutocompleteResult {
   }, []);
 
   const query = useCallback((prefix: string) => {
+    // Do not send queries before the trie has been built.
+    if (!isReadyRef.current) return;
+
     if (debounceTimerRef.current !== null) {
       clearTimeout(debounceTimerRef.current);
     }
     debounceTimerRef.current = setTimeout(() => {
       debounceTimerRef.current = null;
-      trieWorker.postMessage({ type: 'query', prefix });
+      const seq = ++globalSeq;
+      lastSeqRef.current = seq;
+      trieWorker.postMessage({ type: 'query', prefix, seq });
     }, 150);
   }, []);
 
