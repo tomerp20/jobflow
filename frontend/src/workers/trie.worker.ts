@@ -48,7 +48,7 @@ function getWordsWithPrefix(prefix: string, limit: number): string[] {
 self.onmessage = (event: MessageEvent) => {
   const data = event.data as
     | { type: 'build'; words: string[] }
-    | { type: 'query'; prefix: string };
+    | { type: 'query'; prefix: string; seq: number };
 
   if (data.type === 'build') {
     if (!Array.isArray(data.words)) return;
@@ -58,7 +58,7 @@ self.onmessage = (event: MessageEvent) => {
     self.postMessage({ type: 'ready' });
   } else if (data.type === 'query') {
     const suggestions = getWordsWithPrefix(data.prefix, 5);
-    self.postMessage({ type: 'results', suggestions });
+    self.postMessage({ type: 'results', suggestions, seq: data.seq });
   }
 };
 
