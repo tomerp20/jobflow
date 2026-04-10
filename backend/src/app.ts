@@ -1,10 +1,15 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import logger from './config/logger';
 import apiRouter from './routes/index';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
+
+// HTTP response compression (gzip/brotli) — applied before routing so all
+// responses benefit. Especially impactful for the ~6 MB word-list endpoint.
+app.use(compression());
 
 // CORS
 const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
