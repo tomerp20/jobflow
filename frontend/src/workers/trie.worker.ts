@@ -32,12 +32,10 @@ function getWordsWithPrefix(prefix: string, limit: number): string[] {
   const results: string[] = [];
 
   function dfs(current: TrieNode, path: string): void {
-    if (results.length >= limit) return;
     if (current.isEnd) {
       results.push(path);
     }
     for (const [char, child] of current.children) {
-      if (results.length >= limit) return;
       dfs(child, path + char);
     }
   }
@@ -53,6 +51,7 @@ self.onmessage = (event: MessageEvent) => {
     | { type: 'query'; prefix: string };
 
   if (data.type === 'build') {
+    if (!Array.isArray(data.words)) return;
     for (const word of data.words) {
       insert(word);
     }
