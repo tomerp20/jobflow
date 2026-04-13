@@ -405,6 +405,7 @@ export const cardService = {
           stage_id: stageId,
           position,
           updated_at: trx.fn.now(),
+          ...(oldStageId !== stageId ? { last_interaction_date: trx.fn.now() } : {}),
         });
     });
 
