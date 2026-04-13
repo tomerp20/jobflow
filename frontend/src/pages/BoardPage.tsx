@@ -51,9 +51,11 @@ export default function BoardPage() {
     try {
       const updatedCard = await cardsApi.moveCard(cardId, newStageId, newPosition);
       setCards((prev) =>
-        prev.map((c) =>
-          c.id === cardId ? { ...c, lastInteractionDate: updatedCard.lastInteractionDate } : c
-        )
+        prev.map((c) => {
+          if (c.id !== cardId) return c;
+          if (c.lastInteractionDate === updatedCard.lastInteractionDate) return c;
+          return { ...c, lastInteractionDate: updatedCard.lastInteractionDate };
+        })
       );
     } catch {
       fetchData();
