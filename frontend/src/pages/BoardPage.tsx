@@ -49,7 +49,12 @@ export default function BoardPage() {
       )
     );
     try {
-      await cardsApi.moveCard(cardId, newStageId, newPosition);
+      const updatedCard = await cardsApi.moveCard(cardId, newStageId, newPosition);
+      setCards((prev) =>
+        prev.map((c) =>
+          c.id === cardId ? { ...c, lastInteractionDate: updatedCard.lastInteractionDate } : c
+        )
+      );
     } catch {
       fetchData();
     }
