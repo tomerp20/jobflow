@@ -44,11 +44,28 @@ function saveDraft(data: CardFormDraft): void {
   } catch {}
 }
 
+function isValidDraft(value: unknown): value is CardFormDraft {
+  if (!value || typeof value !== 'object') return false;
+  const d = value as Record<string, unknown>;
+  return (
+    typeof d.savedAt === 'number' &&
+    typeof d.companyName === 'string' &&
+    typeof d.roleTitle === 'string' &&
+    typeof d.interestLevel === 'number' &&
+    typeof d.selectedStageId === 'string'
+  );
+}
+
 function loadDraft(): CardFormDraft | null {
   try {
     const raw = localStorage.getItem(DRAFT_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as CardFormDraft;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isValidDraft(parsed)) {
+      localStorage.removeItem(DRAFT_KEY);
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -151,11 +168,6 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
     onClose();
   };
 
-  const handleXClose = () => {
-    clearDraft();
-    onClose();
-  };
-
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!companyName.trim() || !roleTitle.trim()) {
@@ -215,7 +227,7 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
       >
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-xl z-10">
           <h2 className="text-lg font-semibold text-gray-900">New Application</h2>
-          <button onClick={handleXClose} className="p-1 rounded-md hover:bg-gray-100 text-gray-400">
+          <button onClick={handleCancel} className="p-1 rounded-md hover:bg-gray-100 text-gray-400">
             <X size={20} />
           </button>
         </div>
