@@ -153,13 +153,13 @@ export default function BoardPage() {
     : 0;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-y-auto">
       <ReminderBanner />
       <SearchBar filters={filters} onFiltersChange={setFilters} stages={stages} />
       <div className="px-4 mb-4">
         <TodoPanel />
       </div>
-      <div className="flex-1 overflow-hidden px-4 pb-4">
+      <div className="flex-1 px-4 pb-4">
         <Board
           stages={stages}
           cards={cards}

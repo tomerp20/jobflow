@@ -215,7 +215,7 @@ export default function TodoPanel(): JSX.Element {
         style={{
           maxHeight: isOpen ? '500px' : '0',
           opacity: isOpen ? 1 : 0,
-          overflow: 'hidden',
+          overflowY: isOpen ? 'auto' : 'hidden',
           transition: 'max-height 0.3s ease-in-out, opacity 0.2s ease-in-out',
         }}
       >
