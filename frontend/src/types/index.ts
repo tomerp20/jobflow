@@ -38,8 +38,8 @@ export interface Card {
   companyIconUrl?: string;
   createdAt: string;
   updatedAt: string;
-  activeTodoCount: number;
-  totalTodoCount: number;
+  activeTodoCount?: number;
+  totalTodoCount?: number;
 }
 
 export interface CardActivity {

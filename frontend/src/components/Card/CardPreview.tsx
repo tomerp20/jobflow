@@ -101,11 +101,11 @@ export default function CardPreview({ card }: CardPreviewProps) {
             </span>
           )}
         </div>
-        {card.totalTodoCount > 0 && (
+        {(card.totalTodoCount ?? 0) > 0 && (
           <span className={`flex items-center gap-0.5 text-[10px] ${
-            card.activeTodoCount > 0 ? 'text-violet-500' : 'text-gray-400'
+            (card.activeTodoCount ?? 0) > 0 ? 'text-violet-500' : 'text-gray-400'
           }`}>
-            {card.activeTodoCount > 0
+            {(card.activeTodoCount ?? 0) > 0
               ? <ListTodo size={10} />
               : <CheckSquare size={10} />
             }

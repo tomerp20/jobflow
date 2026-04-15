@@ -167,8 +167,13 @@ export default function TodoPanel({ onTodoMutated }: { onTodoMutated?: () => voi
   // Stable callbacks so SortableTodoItem does not re-render on every parent render
   const handleTodoUpdate = useCallback(
     (updated: Todo) => {
-      setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-      onTodoMutated?.();
+      setTodos((prev) => {
+        const existing = prev.find((t) => t.id === updated.id);
+        if (existing && (existing.status !== updated.status || existing.cardId !== updated.cardId)) {
+          onTodoMutated?.();
+        }
+        return prev.map((t) => (t.id === updated.id ? updated : t));
+      });
     },
     [onTodoMutated]
   );
