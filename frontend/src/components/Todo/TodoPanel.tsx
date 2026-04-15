@@ -67,7 +67,7 @@ function SortableTodoItem({
   );
 }
 
-export default function TodoPanel(): JSX.Element {
+export default function TodoPanel({ onTodoMutated }: { onTodoMutated?: () => void }): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [hasFetched, setHasFetched] = useState(false);
@@ -166,14 +166,19 @@ export default function TodoPanel(): JSX.Element {
 
   // Stable callbacks so SortableTodoItem does not re-render on every parent render
   const handleTodoUpdate = useCallback(
-    (updated: Todo) =>
-      setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t))),
-    []
+    (updated: Todo) => {
+      setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      onTodoMutated?.();
+    },
+    [onTodoMutated]
   );
 
   const handleTodoDelete = useCallback(
-    (id: string) => setTodos((prev) => prev.filter((t) => t.id !== id)),
-    []
+    (id: string) => {
+      setTodos((prev) => prev.filter((t) => t.id !== id));
+      onTodoMutated?.();
+    },
+    [onTodoMutated]
   );
 
   return (

@@ -157,7 +157,7 @@ export default function BoardPage() {
       <ReminderBanner />
       <SearchBar filters={filters} onFiltersChange={setFilters} stages={stages} />
       <div className="px-4 mb-4">
-        <TodoPanel />
+        <TodoPanel onTodoMutated={fetchData} />
       </div>
       <div className="flex-1 px-4 pb-4">
         <Board
