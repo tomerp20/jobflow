@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { cardsApi } from '@/services/api';
 import type { Card, Stage } from '@/types';
 import { X, Plus, ChevronDown } from 'lucide-react';
@@ -9,6 +9,72 @@ function toLocalDateStr(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+const DRAFT_KEY = 'jobflow_cardform_draft';
+
+interface CardFormDraft {
+  companyName: string;
+  roleTitle: string;
+  applicationUrl: string;
+  careersUrl: string;
+  source: string;
+  location: string;
+  workMode: 'remote' | 'hybrid' | 'onsite';
+  salaryMin: string;
+  salaryMax: string;
+  salaryCurrency: string;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  notes: string;
+  dateApplied: string;
+  nextFollowupDate: string;
+  recruiterName: string;
+  recruiterEmail: string;
+  techStackInput: string;
+  tagsInput: string;
+  interestLevel: number;
+  selectedStageId: string;
+  showMore: boolean;
+  savedAt: number;
+}
+
+function saveDraft(data: CardFormDraft): void {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
+  } catch {}
+}
+
+function isValidDraft(value: unknown): value is CardFormDraft {
+  if (!value || typeof value !== 'object') return false;
+  const d = value as Record<string, unknown>;
+  return (
+    typeof d.savedAt === 'number' &&
+    typeof d.companyName === 'string' &&
+    typeof d.roleTitle === 'string' &&
+    typeof d.interestLevel === 'number' &&
+    typeof d.selectedStageId === 'string'
+  );
+}
+
+function loadDraft(): CardFormDraft | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isValidDraft(parsed)) {
+      localStorage.removeItem(DRAFT_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function clearDraft(): void {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {}
 }
 
 interface CardFormProps {
@@ -46,7 +112,61 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
   const [showMore, setShowMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [showDraftBanner, setShowDraftBanner] = useState(false);
   const notesRef = useAutoResize(notes);
+
+  useEffect(() => {
+    const draft = loadDraft();
+    if (!draft) return;
+    if (Date.now() - draft.savedAt > 30_000) {
+      clearDraft();
+      return;
+    }
+    setCompanyName(draft.companyName);
+    setRoleTitle(draft.roleTitle);
+    setApplicationUrl(draft.applicationUrl);
+    setCareersUrl(draft.careersUrl);
+    setSource(draft.source);
+    setLocation(draft.location);
+    setWorkMode(draft.workMode);
+    setSalaryMin(draft.salaryMin);
+    setSalaryMax(draft.salaryMax);
+    setSalaryCurrency(draft.salaryCurrency);
+    setPriority(draft.priority);
+    setNotes(draft.notes);
+    setDateApplied(draft.dateApplied);
+    setNextFollowupDate(draft.nextFollowupDate);
+    setRecruiterName(draft.recruiterName);
+    setRecruiterEmail(draft.recruiterEmail);
+    setTechStackInput(draft.techStackInput);
+    setTagsInput(draft.tagsInput);
+    setInterestLevel(draft.interestLevel);
+    setSelectedStageId(draft.selectedStageId);
+    setShowMore(draft.showMore);
+    setShowDraftBanner(true);
+  }, []);
+
+  useEffect(() => {
+    if (!showDraftBanner) return;
+    const t = setTimeout(() => setShowDraftBanner(false), 4000);
+    return () => clearTimeout(t);
+  }, [showDraftBanner]);
+
+  const handleBackdropClick = () => {
+    saveDraft({
+      companyName, roleTitle, applicationUrl, careersUrl, source, location,
+      workMode, salaryMin, salaryMax, salaryCurrency, priority, notes,
+      dateApplied, nextFollowupDate, recruiterName, recruiterEmail,
+      techStackInput, tagsInput, interestLevel, selectedStageId, showMore,
+      savedAt: Date.now(),
+    });
+    onClose();
+  };
+
+  const handleCancel = () => {
+    clearDraft();
+    onClose();
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -91,6 +211,7 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
         interestLevel,
       });
       onCreated(card);
+      clearDraft();
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to create card');
     } finally {
@@ -99,19 +220,25 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={handleBackdropClick}>
       <div
         className="bg-white rounded-xl shadow-xl w-full max-w-xl mx-4 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-xl z-10">
           <h2 className="text-lg font-semibold text-gray-900">New Application</h2>
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100 text-gray-400">
+          <button onClick={handleCancel} className="p-1 rounded-md hover:bg-gray-100 text-gray-400">
             <X size={20} />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
+          {showDraftBanner && (
+            <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700">
+              Draft restored — your unsaved changes from a moment ago have been recovered.
+            </div>
+          )}
+
           {error && (
             <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
           )}
@@ -397,7 +524,7 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleCancel}
               className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition"
             >
               Cancel
