@@ -1,5 +1,5 @@
 import type { Card } from '@/types';
-import { MapPin, Monitor, Home, Building2, Clock, CalendarClock, DollarSign } from 'lucide-react';
+import { MapPin, Monitor, Home, Building2, Clock, CalendarClock, DollarSign, ListTodo, CheckSquare } from 'lucide-react';
 import { formatDistanceToNow, parseISO, differenceInDays } from 'date-fns';
 
 const priorityConfig: Record<string, { class: string; label: string }> = {
@@ -101,6 +101,17 @@ export default function CardPreview({ card }: CardPreviewProps) {
             </span>
           )}
         </div>
+        {(card.totalTodoCount ?? 0) > 0 && (
+          <span className={`flex items-center gap-0.5 text-[10px] ${
+            (card.activeTodoCount ?? 0) > 0 ? 'text-violet-500' : 'text-gray-400'
+          }`}>
+            {(card.activeTodoCount ?? 0) > 0
+              ? <ListTodo size={10} />
+              : <CheckSquare size={10} />
+            }
+            {card.totalTodoCount}
+          </span>
+        )}
       </div>
 
       {/* Tech stack tags */}

@@ -195,7 +195,9 @@ export const cardService = {
       .where('cards.user_id', userId)
       .select(
         'cards.*',
-        'stages.name as stage_name'
+        'stages.name as stage_name',
+        db.raw(`(SELECT COUNT(*) FROM todo_items WHERE todo_items.card_id = cards.id)::int AS total_todo_count`),
+        db.raw(`(SELECT COUNT(*) FROM todo_items WHERE todo_items.card_id = cards.id AND todo_items.status = 'active')::int AS active_todo_count`)
       )
       .orderBy('cards.position', 'asc');
 
