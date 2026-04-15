@@ -61,7 +61,14 @@ export default function SearchBar({ filters, onFiltersChange, stages }: SearchBa
     <div className="px-4 py-3 space-y-2">
       <div className="flex items-center gap-2">
         {/* Search input */}
-        <div className="relative flex-1 max-w-md">
+        <div
+          className="relative flex-1 max-w-md"
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setInputFocused(false);
+            }
+          }}
+        >
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
@@ -71,11 +78,6 @@ export default function SearchBar({ filters, onFiltersChange, stages }: SearchBa
               setInputFocused(true);
               triggerInit();
             }}
-            // Note: onBlur unconditionally hides the dropdown. Tab-key navigation
-            // from the input to a suggestion button will not work because blur fires
-            // before the button receives focus. A relatedTarget check is needed for
-            // full keyboard accessibility if that use case is added in the future.
-            onBlur={() => setInputFocused(false)}
             placeholder="Search companies, roles, tech stack..."
             className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-8 text-sm transition focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
           />
