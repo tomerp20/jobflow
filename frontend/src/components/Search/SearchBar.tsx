@@ -64,7 +64,7 @@ export default function SearchBar({ filters, onFiltersChange, stages }: SearchBa
         <div
           className="relative flex-1 max-w-md"
           onBlur={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
               setInputFocused(false);
             }
           }}
