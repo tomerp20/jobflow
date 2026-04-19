@@ -52,10 +52,16 @@ async function connect(retryDelay = BASE_RETRY_DELAY_MS): Promise<void> {
     throw new Error('DATABASE_URL environment variable is required for pgSubscriber');
   }
 
+  // Neon routes pooled connections through PgBouncer (transaction mode), which
+  // silently accepts LISTEN but never delivers NOTIFY events. Strip '-pooler'
+  // from the hostname to force a direct connection for this dedicated listener.
+  const directConnectionString = connectionString.replace('-pooler.', '.');
+
   const requiresSsl =
-    connectionString.includes('.render.com') || connectionString.includes('.neon.tech');
+    directConnectionString.includes('.render.com') ||
+    directConnectionString.includes('.neon.tech');
   const client = new Client({
-    connectionString,
+    connectionString: directConnectionString,
     ssl: requiresSsl ? { rejectUnauthorized: false } : false,
   });
 
