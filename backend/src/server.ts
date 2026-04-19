@@ -18,7 +18,7 @@ async function start() {
     process.exit(1);
   }
 
-  await pgSubscriber.connect();
+  pgSubscriber.connect(); // non-blocking: retries in background on failure
 
   app.listen(PORT, () => {
     logger.info('JobFlow API server started', {

@@ -1,17 +1,11 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import db from '../config/database';
 import logger from '../config/logger';
 import { pgSubscriber } from '../services/pgSubscriber';
+import { JwtPayload } from '../middleware/auth';
 
 const router = Router();
-
-interface JwtPayload {
-  userId: string;
-  email: string;
-  iat: number;
-  exp: number;
-}
 
 /**
  * GET /api/events
@@ -19,8 +13,12 @@ interface JwtPayload {
  * SSE endpoint for real-time card-event notifications. The browser
  * EventSource API cannot set custom headers, so the JWT is passed as a
  * query parameter: ?token=<jwt>
+ *
+ * Security note: passing a token in the URL causes it to appear in server
+ * access logs and browser history. Ensure any access-log middleware (e.g.
+ * morgan) is configured to redact the `token` query param on this route.
  */
-router.get('/', async (req: Request, res: Response): Promise<void> => {
+router.get('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const token = req.query.token as string;
 
   if (!token) {
@@ -43,18 +41,25 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  // Verify the user still exists in the database
-  const user = await db('users')
-    .select('id')
-    .where({ id: decoded.userId })
-    .first();
+  // Verify the user still exists in the database — wrapped in try/catch so DB
+  // errors are forwarded to the Express error handler before SSE headers are set
+  let userId: string;
+  try {
+    const user = await db('users')
+      .select('id')
+      .where({ id: decoded.userId })
+      .first();
 
-  if (!user) {
-    res.status(401).json({ error: 'Invalid token' });
+    if (!user) {
+      res.status(401).json({ error: 'Invalid token' });
+      return;
+    }
+
+    userId = user.id as string;
+  } catch (err) {
+    next(err);
     return;
   }
-
-  const userId = user.id as string;
 
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
