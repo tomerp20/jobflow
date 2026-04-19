@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.migrations.json",
     "start": "node dist/server.js",
     "start:prod": "npm run migrate:prod && node dist/server.js",
     "migrate": "knex migrate:latest --knexfile knexfile.ts",
