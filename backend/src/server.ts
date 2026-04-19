@@ -4,6 +4,7 @@ dotenv.config();
 import app from './app';
 import logger from './config/logger';
 import db from './config/database';
+import { pgSubscriber } from './services/pgSubscriber';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
@@ -16,6 +17,8 @@ async function start() {
     logger.error('Failed to connect to database', { error: (err as Error).message });
     process.exit(1);
   }
+
+  pgSubscriber.connect(); // non-blocking: retries in background on failure
 
   app.listen(PORT, () => {
     logger.info('JobFlow API server started', {

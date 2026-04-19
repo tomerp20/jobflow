@@ -2,7 +2,6 @@ import { Client } from 'pg';
 import type { Response } from 'express';
 import logger from '../config/logger';
 
-const DEFAULT_CONNECTION_STRING = 'postgresql://jobflow:jobflow@localhost:5432/jobflow';
 const BASE_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
@@ -30,10 +29,9 @@ function notifyUser(userId: string, data: Record<string, unknown>): void {
   const dead: Response[] = [];
   for (const res of clients) {
     try {
-      const ok = res.write(`data: ${JSON.stringify(data)}\n\n`);
-      if (!ok) {
-        dead.push(res);
-      }
+      // res.write() returning false signals backpressure, not a broken connection —
+      // only a thrown exception indicates the socket is truly gone.
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
     } catch {
       dead.push(res);
     }
@@ -47,9 +45,12 @@ function notifyUser(userId: string, data: Record<string, unknown>): void {
 }
 
 async function connect(retryDelay = BASE_RETRY_DELAY_MS): Promise<void> {
-  const client = new Client({
-    connectionString: process.env.DATABASE_URL || DEFAULT_CONNECTION_STRING,
-  });
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error('DATABASE_URL environment variable is required for pgSubscriber');
+  }
+
+  const client = new Client({ connectionString });
 
   const scheduleReconnect = () => {
     client.end().catch(() => {
