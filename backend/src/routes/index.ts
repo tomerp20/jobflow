@@ -7,6 +7,7 @@ import dashboardRouter from './dashboard';
 import remindersRouter from './reminders';
 import todosRouter from './todos';
 import autocompleteRouter from './autocomplete';
+import eventsRouter from './events';
 
 const router = Router();
 
@@ -23,5 +24,6 @@ router.use('/dashboard', dashboardRouter);
 router.use('/reminders', remindersRouter);
 router.use('/todos', todosRouter);
 router.use('/autocomplete', autocompleteRouter);
+router.use('/events', eventsRouter);
 
 export default router;
