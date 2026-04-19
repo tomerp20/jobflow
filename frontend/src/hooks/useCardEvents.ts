@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import type { Card } from '@/types';
-import { cardsApi } from '@/services/api';
+import { cardsApi, API_BASE_URL } from '@/services/api';
 
 interface UseCardEventsProps {
   setCards: React.Dispatch<React.SetStateAction<Card[]>>;
@@ -11,8 +11,7 @@ export function useCardEvents({ setCards }: UseCardEventsProps): void {
     const token = localStorage.getItem('accessToken');
     if (!token) return;
 
-    const baseUrl = import.meta.env.VITE_API_URL || '/api';
-    const es = new EventSource(`${baseUrl}/events?token=${encodeURIComponent(token)}`);
+    const es = new EventSource(`${API_BASE_URL}/events?token=${encodeURIComponent(token)}`);
 
     es.onmessage = async (event: MessageEvent) => {
       let payload: { event: string; cardId: string };
