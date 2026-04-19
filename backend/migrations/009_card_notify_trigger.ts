@@ -28,6 +28,8 @@ export async function up(knex: Knex): Promise<void> {
         END IF;
       END IF;
 
+      -- pg_notify enforces an 8000-byte payload limit; this payload is
+      -- intentionally minimal (event, card_id, user_id) to stay well under it.
       payload := json_build_object(
         'event',   event_type,
         'card_id', card_id,
@@ -41,6 +43,9 @@ export async function up(knex: Knex): Promise<void> {
     $$ LANGUAGE plpgsql;
   `);
 
+  // Drop before re-creating so up() is idempotent if re-run after a partial failure.
+  await knex.raw(`DROP TRIGGER IF EXISTS card_notify_trigger ON cards;`);
+
   await knex.raw(`
     CREATE TRIGGER card_notify_trigger
     AFTER INSERT OR UPDATE OR DELETE ON cards
@@ -50,5 +55,6 @@ export async function up(knex: Knex): Promise<void> {
 
 export async function down(knex: Knex): Promise<void> {
   await knex.raw(`DROP TRIGGER IF EXISTS card_notify_trigger ON cards;`);
-  await knex.raw(`DROP FUNCTION IF EXISTS notify_card_event();`);
+  // CASCADE ensures rollback succeeds even if other objects reference the function.
+  await knex.raw(`DROP FUNCTION IF EXISTS notify_card_event() CASCADE;`);
 }
