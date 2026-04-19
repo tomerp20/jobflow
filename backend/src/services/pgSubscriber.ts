@@ -50,7 +50,12 @@ async function connect(retryDelay = BASE_RETRY_DELAY_MS): Promise<void> {
     throw new Error('DATABASE_URL environment variable is required for pgSubscriber');
   }
 
-  const client = new Client({ connectionString });
+  const requiresSsl =
+    connectionString.includes('.render.com') || connectionString.includes('.neon.tech');
+  const client = new Client({
+    connectionString,
+    ssl: requiresSsl ? { rejectUnauthorized: false } : false,
+  });
 
   const scheduleReconnect = () => {
     client.end().catch(() => {
