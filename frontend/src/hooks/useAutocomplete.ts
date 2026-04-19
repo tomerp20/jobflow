@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import trieWorker from '@/workers/trieWorker';
+import { API_BASE_URL } from '@/services/api';
 
 // Sequence counter shared across all instances so each query can be
 // matched back to the instance that issued it.
@@ -55,8 +56,7 @@ export function useAutocomplete(): UseAutocompleteResult {
     initializedRef.current = true;
     setIsLoading(true);
 
-    const baseUrl = import.meta.env.VITE_API_URL ?? '/api';
-    fetch(`${baseUrl}/autocomplete/words`)
+    fetch(`${API_BASE_URL}/autocomplete/words`)
       .then((res) => {
         if (!res.ok) {
           throw new Error(`Failed to fetch words: ${res.status}`);

@@ -2,8 +2,10 @@ import axios from 'axios';
 import type { Card, CardActivity, CardFilters, DashboardData, Stage, Todo, User } from '@/types';
 import { snakeToCamel, camelToSnake } from '@/utils/caseTransform';
 
+export const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -63,8 +65,7 @@ api.interceptors.response.use(
       }
 
       try {
-        const baseUrl = import.meta.env.VITE_API_URL || '/api';
-        const { data } = await axios.post(`${baseUrl}/auth/refresh`, { refreshToken });
+        const { data } = await axios.post(`${API_BASE_URL}/auth/refresh`, { refreshToken });
         const newToken = data.accessToken;
         localStorage.setItem('accessToken', newToken);
         if (data.refreshToken) {
