@@ -61,6 +61,11 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
     return;
   }
 
+  // Disable compression for this response — the compression middleware buffers
+  // writes into a gzip stream, preventing heartbeats from reaching the proxy.
+  // Clearing accept-encoding tells the middleware to skip compression here.
+  req.headers['accept-encoding'] = 'identity';
+
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -68,12 +73,19 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
   res.setHeader('X-Accel-Buffering', 'no'); // disables nginx buffering
   res.flushHeaders();
 
+  // Helper: write and immediately flush past any remaining middleware buffers
+  const send = (chunk: string) => {
+    res.write(chunk);
+    // compression middleware adds res.flush(); call it if present
+    (res as unknown as { flush?: () => void }).flush?.();
+  };
+
   // Send initial connected event
-  res.write('data: {"event":"connected"}\n\n');
+  send('data: {"event":"connected"}\n\n');
 
   pgSubscriber.registerClient(userId, res);
 
-  const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 25_000);
+  const heartbeat = setInterval(() => send(': heartbeat\n\n'), 25_000);
 
   req.on('close', () => {
     clearInterval(heartbeat);
