@@ -11,7 +11,8 @@ export function useCardEvents({ setCards }: UseCardEventsProps): void {
     const token = localStorage.getItem('accessToken');
     if (!token) return;
 
-    const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    const baseUrl = import.meta.env.VITE_API_URL || '/api';
+    const es = new EventSource(`${baseUrl}/events?token=${encodeURIComponent(token)}`);
 
     es.onmessage = async (event: MessageEvent) => {
       let payload: { event: string; cardId: string };

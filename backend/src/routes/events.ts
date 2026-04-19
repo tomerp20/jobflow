@@ -73,7 +73,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
 
   pgSubscriber.registerClient(userId, res);
 
-  const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 30_000);
+  const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 25_000);
 
   req.on('close', () => {
     clearInterval(heartbeat);
