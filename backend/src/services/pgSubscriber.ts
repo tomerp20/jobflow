@@ -32,6 +32,8 @@ function notifyUser(userId: string, data: Record<string, unknown>): void {
       // res.write() returning false signals backpressure, not a broken connection —
       // only a thrown exception indicates the socket is truly gone.
       res.write(`data: ${JSON.stringify(data)}\n\n`);
+      // Flush past any remaining middleware buffers (e.g. compression)
+      (res as unknown as { flush?: () => void }).flush?.();
     } catch {
       dead.push(res);
     }
