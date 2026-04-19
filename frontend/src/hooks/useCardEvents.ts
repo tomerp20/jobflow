@@ -3,7 +3,6 @@ import type { Card } from '@/types';
 import { cardsApi } from '@/services/api';
 
 interface UseCardEventsProps {
-  cards: Card[];
   setCards: React.Dispatch<React.SetStateAction<Card[]>>;
 }
 
@@ -12,7 +11,7 @@ export function useCardEvents({ setCards }: UseCardEventsProps): void {
     const token = localStorage.getItem('accessToken');
     if (!token) return;
 
-    const es = new EventSource(`/api/events?token=${token}`);
+    const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
 
     es.onmessage = async (event: MessageEvent) => {
       let payload: { event: string; cardId: string };
@@ -29,7 +28,11 @@ export function useCardEvents({ setCards }: UseCardEventsProps): void {
         case 'card.created': {
           try {
             const { card } = await cardsApi.getCard(cardId);
-            setCards((prev) => [...prev, card]);
+            // Guard against duplicates — the optimistic update from the local
+            // create handler may have already inserted this card into state.
+            setCards((prev) =>
+              prev.some((c) => c.id === card.id) ? prev : [...prev, card]
+            );
           } catch (err) {
             console.error('[useCardEvents] Failed to fetch created card:', err);
           }
@@ -63,12 +66,22 @@ export function useCardEvents({ setCards }: UseCardEventsProps): void {
 
     es.onerror = (err) => {
       console.error('[useCardEvents] SSE connection error:', err);
-      // EventSource auto-reconnects by default; no manual reconnect needed
+      // EventSource auto-reconnects by default. On reconnect it will reuse the
+      // same URL (with the original token). If the access token has been
+      // silently refreshed while the connection was open, close this instance
+      // so the parent can re-mount with the current token.
+      const currentToken = localStorage.getItem('accessToken');
+      if (currentToken && currentToken !== token) {
+        es.close();
+      }
     };
 
     return () => {
       es.close();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // setCards is a stable useState dispatcher — safe to omit from deps.
+    // The effect intentionally runs once per mount so a single SSE connection
+    // is opened for the lifetime of the component.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }
