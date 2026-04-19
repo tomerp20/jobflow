@@ -8,7 +8,7 @@ import CardDetail from '@/components/Card/CardDetail';
 import CardForm from '@/components/Card/CardForm';
 import StageForm from '@/components/Board/StageForm';
 import TodoPanel from '@/components/Todo/TodoPanel';
-import { useCardEvents } from '../hooks/useCardEvents';
+import { useCardEvents } from '@/hooks/useCardEvents';
 
 export default function BoardPage() {
   const [stages, setStages] = useState<Stage[]>([]);
