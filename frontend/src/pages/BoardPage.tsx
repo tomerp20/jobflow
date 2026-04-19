@@ -8,6 +8,7 @@ import CardDetail from '@/components/Card/CardDetail';
 import CardForm from '@/components/Card/CardForm';
 import StageForm from '@/components/Board/StageForm';
 import TodoPanel from '@/components/Todo/TodoPanel';
+import { useCardEvents } from '@/hooks/useCardEvents';
 
 export default function BoardPage() {
   const [stages, setStages] = useState<Stage[]>([]);
@@ -22,6 +23,8 @@ export default function BoardPage() {
   const [showStageForm, setShowStageForm] = useState(false);
   const [editingStage, setEditingStage] = useState<Stage | undefined>(undefined);
   const [deleteConfirmStage, setDeleteConfirmStage] = useState<Stage | null>(null);
+
+  useCardEvents({ setCards });
 
   const fetchData = useCallback(async () => {
     try {
