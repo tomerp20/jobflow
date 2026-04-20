@@ -14,7 +14,7 @@ export function useCardEvents({ setCards }: UseCardEventsProps): void {
     const es = new EventSource(`${API_BASE_URL}/events?token=${encodeURIComponent(token)}`);
 
     es.onmessage = async (event: MessageEvent) => {
-      let payload: { event: string; cardId: string };
+      let payload: { event: string; card_id: string };
       try {
         payload = JSON.parse(event.data as string);
       } catch (err) {
@@ -22,7 +22,8 @@ export function useCardEvents({ setCards }: UseCardEventsProps): void {
         return;
       }
 
-      const { event: eventName, cardId } = payload;
+      // Payload uses snake_case from the PostgreSQL trigger — not transformed by the API layer
+      const { event: eventName, card_id: cardId } = payload;
 
       switch (eventName) {
         case 'card.created': {
