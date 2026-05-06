@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 interface AutocompleteDropdownProps {
   suggestions: string[];
   isLoading: boolean;
+  highlightedIndex?: number;
   onSelect: (word: string) => void;
   onDismiss: () => void;
 }
@@ -11,6 +12,7 @@ interface AutocompleteDropdownProps {
 export default function AutocompleteDropdown({
   suggestions,
   isLoading,
+  highlightedIndex = -1,
   onSelect,
   onDismiss,
 }: AutocompleteDropdownProps) {
@@ -57,22 +59,29 @@ export default function AutocompleteDropdown({
             Loading…
           </li>
         ) : (
-          visibleSuggestions.map((word) => (
-            <li key={word} role="option" aria-selected={false}>
-              <button
-                type="button"
-                dir="auto"
-                className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:bg-primary-50 focus:text-primary-700"
-                onMouseDown={(e) => {
-                  // Prevent the parent input from losing focus before click registers
-                  e.preventDefault();
-                }}
-                onClick={() => onSelect(word)}
-              >
-                {word}
-              </button>
-            </li>
-          ))
+          visibleSuggestions.map((word, idx) => {
+            const isHighlighted = idx === highlightedIndex;
+            return (
+              <li key={word} role="option" aria-selected={isHighlighted}>
+                <button
+                  type="button"
+                  dir="auto"
+                  className={`w-full px-3 py-2 text-left text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500/20 ${
+                    isHighlighted
+                      ? 'bg-primary-50 text-primary-700'
+                      : 'text-gray-700 hover:bg-primary-50 hover:text-primary-700 focus:bg-primary-50 focus:text-primary-700'
+                  }`}
+                  onMouseDown={(e) => {
+                    // Prevent the parent input from losing focus before click registers
+                    e.preventDefault();
+                  }}
+                  onClick={() => onSelect(word)}
+                >
+                  {word}
+                </button>
+              </li>
+            );
+          })
         )}
       </ul>
     </div>

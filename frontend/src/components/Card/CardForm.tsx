@@ -317,6 +317,7 @@ export default function CardForm({ stageId, stages, roleTitleSuggestions = [], o
                 <AutocompleteDropdown
                   suggestions={roleTitleMatches}
                   isLoading={false}
+                  highlightedIndex={highlightedIndex}
                   onSelect={(value) => {
                     setRoleTitle(value);
                     setHighlightedIndex(-1);
