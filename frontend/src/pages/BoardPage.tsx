@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { stagesApi, cardsApi } from '@/services/api';
 import type { Stage, Card, CardFilters } from '@/types';
 import Board from '@/components/Board/Board';
@@ -151,6 +151,11 @@ export default function BoardPage() {
     }
   };
 
+  const roleTitleSuggestions = useMemo(
+    () => Array.from(new Set(cards.map((c) => c.roleTitle))).sort(),
+    [cards],
+  );
+
   const stageCardCount = deleteConfirmStage
     ? cards.filter((c) => c.stageId === deleteConfirmStage.id).length
     : 0;
@@ -191,6 +196,7 @@ export default function BoardPage() {
         <CardForm
           stageId={createStageId}
           stages={stages}
+          roleTitleSuggestions={roleTitleSuggestions}
           onClose={() => setShowCreateForm(false)}
           onCreated={handleCardCreated}
         />
