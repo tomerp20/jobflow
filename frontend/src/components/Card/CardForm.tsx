@@ -91,6 +91,7 @@ export default function CardForm({ stageId, stages, roleTitleSuggestions = [], o
   const [companyName, setCompanyName] = useState('');
   const [roleTitle, setRoleTitle] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [roleTitleDismissed, setRoleTitleDismissed] = useState(false);
   const [applicationUrl, setApplicationUrl] = useState('');
   const [careersUrl, setCareersUrl] = useState('');
   const [source, setSource] = useState('');
@@ -120,7 +121,7 @@ export default function CardForm({ stageId, stages, roleTitleSuggestions = [], o
   const notesRef = useAutoResize(notes);
 
   const roleTitleMatches = useStringAutocomplete(roleTitleSuggestions, roleTitle);
-  const showRoleTitleDropdown = roleTitle.length >= 1 && roleTitleMatches.length > 0;
+  const showRoleTitleDropdown = roleTitle.length >= 1 && roleTitleMatches.length > 0 && !roleTitleDismissed;
 
   useEffect(() => {
     const draft = loadDraft();
@@ -292,6 +293,7 @@ export default function CardForm({ stageId, stages, roleTitleSuggestions = [], o
                 onChange={(e) => {
                   setRoleTitle(e.target.value);
                   setHighlightedIndex(-1);
+                  setRoleTitleDismissed(false);
                 }}
                 onKeyDown={(e) => {
                   if (!showRoleTitleDropdown) return;
@@ -305,8 +307,10 @@ export default function CardForm({ stageId, stages, roleTitleSuggestions = [], o
                     e.preventDefault();
                     setRoleTitle(roleTitleMatches[highlightedIndex]);
                     setHighlightedIndex(-1);
+                    setRoleTitleDismissed(true);
                   } else if (e.key === 'Escape') {
                     setHighlightedIndex(-1);
+                    setRoleTitleDismissed(true);
                   }
                 }}
                 className="input-field"
@@ -321,8 +325,12 @@ export default function CardForm({ stageId, stages, roleTitleSuggestions = [], o
                   onSelect={(value) => {
                     setRoleTitle(value);
                     setHighlightedIndex(-1);
+                    setRoleTitleDismissed(true);
                   }}
-                  onDismiss={() => setHighlightedIndex(-1)}
+                  onDismiss={() => {
+                    setHighlightedIndex(-1);
+                    setRoleTitleDismissed(true);
+                  }}
                 />
               )}
             </div>
