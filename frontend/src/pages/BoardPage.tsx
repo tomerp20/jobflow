@@ -191,6 +191,7 @@ export default function BoardPage() {
         <CardForm
           stageId={createStageId}
           stages={stages}
+          roleTitleSuggestions={Array.from(new Set(cards.map((c) => c.roleTitle).filter(Boolean))).sort()}
           onClose={() => setShowCreateForm(false)}
           onCreated={handleCardCreated}
         />

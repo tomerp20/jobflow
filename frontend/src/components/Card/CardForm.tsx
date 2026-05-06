@@ -3,6 +3,8 @@ import { cardsApi } from '@/services/api';
 import type { Card, Stage } from '@/types';
 import { X, Plus, ChevronDown } from 'lucide-react';
 import { useAutoResize } from '@/hooks/useAutoResize';
+import { useStringAutocomplete } from '@/hooks/useStringAutocomplete';
+import AutocompleteDropdown from '@/components/AutocompleteDropdown';
 
 function toLocalDateStr(date: Date): string {
   const year = date.getFullYear();
@@ -80,13 +82,15 @@ function clearDraft(): void {
 interface CardFormProps {
   stageId: string;
   stages: Stage[];
+  roleTitleSuggestions?: string[];
   onClose: () => void;
   onCreated: (card: Card) => void;
 }
 
-export default function CardForm({ stageId, stages, onClose, onCreated }: CardFormProps) {
+export default function CardForm({ stageId, stages, roleTitleSuggestions = [], onClose, onCreated }: CardFormProps) {
   const [companyName, setCompanyName] = useState('');
   const [roleTitle, setRoleTitle] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [applicationUrl, setApplicationUrl] = useState('');
   const [careersUrl, setCareersUrl] = useState('');
   const [source, setSource] = useState('');
@@ -114,6 +118,9 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
   const [error, setError] = useState('');
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const notesRef = useAutoResize(notes);
+
+  const roleTitleMatches = useStringAutocomplete(roleTitleSuggestions, roleTitle);
+  const showRoleTitleDropdown = roleTitle.length >= 1 && roleTitleMatches.length > 0;
 
   useEffect(() => {
     const draft = loadDraft();
@@ -274,7 +281,7 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
                 placeholder="Acme Inc."
               />
             </div>
-            <div>
+            <div className="relative">
               <label className="label-text">
                 Role Title <span className="text-red-500">*</span>
               </label>
@@ -282,10 +289,41 @@ export default function CardForm({ stageId, stages, onClose, onCreated }: CardFo
                 type="text"
                 required
                 value={roleTitle}
-                onChange={(e) => setRoleTitle(e.target.value)}
+                onChange={(e) => {
+                  setRoleTitle(e.target.value);
+                  setHighlightedIndex(-1);
+                }}
+                onKeyDown={(e) => {
+                  if (!showRoleTitleDropdown) return;
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setHighlightedIndex((i) => Math.min(i + 1, roleTitleMatches.length - 1));
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setHighlightedIndex((i) => Math.max(i - 1, 0));
+                  } else if (e.key === 'Enter' && highlightedIndex >= 0) {
+                    e.preventDefault();
+                    setRoleTitle(roleTitleMatches[highlightedIndex]);
+                    setHighlightedIndex(-1);
+                  } else if (e.key === 'Escape') {
+                    setHighlightedIndex(-1);
+                  }
+                }}
                 className="input-field"
                 placeholder="Senior Frontend Engineer"
+                autoComplete="off"
               />
+              {showRoleTitleDropdown && (
+                <AutocompleteDropdown
+                  suggestions={roleTitleMatches}
+                  isLoading={false}
+                  onSelect={(value) => {
+                    setRoleTitle(value);
+                    setHighlightedIndex(-1);
+                  }}
+                  onDismiss={() => setHighlightedIndex(-1)}
+                />
+              )}
             </div>
           </div>
 
