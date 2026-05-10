@@ -158,6 +158,7 @@ export const stageService = {
     }
 
     await db.transaction(async (trx) => {
+      await trx.raw('SET CONSTRAINTS stages_user_id_position_unique DEFERRED');
       for (let i = 0; i < stageIds.length; i++) {
         await trx('stages')
           .where({ id: stageIds[i], user_id: userId })
