@@ -225,17 +225,15 @@ export const remindersApi = {
 };
 
 // Gmail API
+export type GmailStatusData =
+  | { connected: false }
+  | { connected: true; isValid: true; email: string; lastSyncAt: string | null }
+  | { connected: true; isValid: false; email: string; lastSyncAt: string | null };
+
 export const gmailApi = {
-  getStatus: async (): Promise<
-    | { connected: false }
-    | { connected: true; isValid: true; email: string; lastSyncAt: string | null }
-    | { connected: true; isValid: false; email: string; lastSyncAt: string | null }
-  > => {
+  getStatus: async (): Promise<GmailStatusData> => {
     const res = await api.get('/gmail/status');
-    return snakeToCamel(res.data.data) as
-      | { connected: false }
-      | { connected: true; isValid: true; email: string; lastSyncAt: string | null }
-      | { connected: true; isValid: false; email: string; lastSyncAt: string | null };
+    return snakeToCamel(res.data.data) as GmailStatusData;
   },
 };
 
