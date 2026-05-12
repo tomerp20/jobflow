@@ -81,7 +81,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
   };
 
   // Send initial connected event
-  send('data: {"event":"connected"}\n\n');
+  send('event: message\ndata: {"event":"connected"}\n\n');
 
   pgSubscriber.registerClient(userId, res);
 

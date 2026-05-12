@@ -79,3 +79,13 @@ export interface Todo {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface Notification {
+  id: string;
+  userId: string;
+  title: string;
+  body: string;
+  metadata: Record<string, unknown> | null;
+  readAt: string | null;
+  createdAt: string;
+}

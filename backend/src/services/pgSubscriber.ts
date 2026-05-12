@@ -23,7 +23,7 @@ function removeClient(userId: string, res: Response): void {
   }
 }
 
-function notifyUser(userId: string, data: Record<string, unknown>): void {
+function writeToUser(userId: string, sseEvent: string, data: Record<string, unknown>): void {
   const clients = sseClients.get(userId);
   if (!clients) return;
   const dead: Response[] = [];
@@ -31,7 +31,7 @@ function notifyUser(userId: string, data: Record<string, unknown>): void {
     try {
       // res.write() returning false signals backpressure, not a broken connection —
       // only a thrown exception indicates the socket is truly gone.
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      res.write(`event: ${sseEvent}\ndata: ${JSON.stringify(data)}\n\n`);
       // Flush past any remaining middleware buffers (e.g. compression)
       (res as unknown as { flush?: () => void }).flush?.();
     } catch {
@@ -77,7 +77,8 @@ async function connect(retryDelay = BASE_RETRY_DELAY_MS): Promise<void> {
   try {
     await client.connect();
     await client.query('LISTEN card_events');
-    logger.info('pgSubscriber connected and listening on card_events');
+    await client.query('LISTEN notification_events');
+    logger.info('pgSubscriber connected and listening on card_events, notification_events');
   } catch (err) {
     logger.error('pgSubscriber failed to connect', { error: (err as Error).message });
     scheduleReconnect();
@@ -88,7 +89,14 @@ async function connect(retryDelay = BASE_RETRY_DELAY_MS): Promise<void> {
     try {
       const payload = JSON.parse(msg.payload ?? '') as Record<string, unknown>;
       const userId = payload.user_id as string;
-      notifyUser(userId, payload);
+
+      if (msg.channel === 'notification_events') {
+        writeToUser(userId, 'notification', {
+          notification_id: payload.notification_id,
+        });
+      } else {
+        writeToUser(userId, 'message', payload);
+      }
     } catch (err) {
       logger.error('pgSubscriber failed to parse notification payload', {
         error: (err as Error).message,
