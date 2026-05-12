@@ -9,7 +9,7 @@ interface NotificationPanelProps {
   onRead: (id: string) => void;
   onReadAll: () => void;
   onClose: () => void;
-  triggerRef: RefObject<HTMLButtonElement>;
+  triggerRef: RefObject<HTMLButtonElement | null>;
 }
 
 export default function NotificationPanel({
