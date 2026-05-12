@@ -19,24 +19,32 @@ interface NotificationItemProps {
 export default function NotificationItem({ notification, onRead }: NotificationItemProps) {
   const isUnread = notification.readAt === null;
 
+  const content = (
+    <div className="min-w-0 flex-1 text-left">
+      <p className={`text-sm ${isUnread ? 'font-semibold text-gray-900' : 'font-normal text-gray-500'}`}>
+        {notification.title}
+      </p>
+      <p className={`text-sm mt-0.5 ${isUnread ? 'text-gray-700' : 'text-gray-400'}`}>
+        {notification.body}
+      </p>
+      <p className="text-xs text-gray-400 mt-1">{timeAgo(notification.createdAt)}</p>
+    </div>
+  );
+
+  if (isUnread) {
+    return (
+      <button
+        onClick={() => onRead(notification.id)}
+        className="flex w-full gap-3 px-4 py-3 border-l-4 border-primary-500 bg-primary-50 hover:bg-primary-100 transition-colors"
+      >
+        {content}
+      </button>
+    );
+  }
+
   return (
-    <div
-      onClick={() => { if (isUnread) onRead(notification.id); }}
-      className={`flex gap-3 px-4 py-3 border-l-4 transition-colors ${
-        isUnread
-          ? 'border-primary-500 bg-primary-50 cursor-pointer hover:bg-primary-100'
-          : 'border-transparent bg-white cursor-default'
-      }`}
-    >
-      <div className="min-w-0 flex-1">
-        <p className={`text-sm ${isUnread ? 'font-semibold text-gray-900' : 'font-normal text-gray-500'}`}>
-          {notification.title}
-        </p>
-        <p className={`text-sm mt-0.5 ${isUnread ? 'text-gray-700' : 'text-gray-400'}`}>
-          {notification.body}
-        </p>
-        <p className="text-xs text-gray-400 mt-1">{timeAgo(notification.createdAt)}</p>
-      </div>
+    <div className="flex gap-3 px-4 py-3 border-l-4 border-transparent bg-white">
+      {content}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, RefObject } from 'react';
 import { Bell } from 'lucide-react';
 import type { Notification } from '@/types';
 import NotificationItem from './NotificationItem';
@@ -9,6 +9,7 @@ interface NotificationPanelProps {
   onRead: (id: string) => void;
   onReadAll: () => void;
   onClose: () => void;
+  triggerRef: RefObject<HTMLButtonElement>;
 }
 
 export default function NotificationPanel({
@@ -17,18 +18,24 @@ export default function NotificationPanel({
   onRead,
   onReadAll,
   onClose,
+  triggerRef,
 }: NotificationPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      if (
+        panelRef.current &&
+        !panelRef.current.contains(e.target as Node) &&
+        triggerRef.current &&
+        !triggerRef.current.contains(e.target as Node)
+      ) {
         onClose();
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [onClose]);
+  }, [onClose, triggerRef]);
 
   return (
     <div

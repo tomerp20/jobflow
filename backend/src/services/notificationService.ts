@@ -1,4 +1,5 @@
 import db from '../config/database';
+import { AppError } from '../middleware/errorHandler';
 
 export interface Notification {
   id: string;
@@ -35,6 +36,12 @@ export const notificationService = {
   },
 
   async markRead(notificationId: string, userId: string): Promise<void> {
+    const existing = await db('notifications')
+      .where({ id: notificationId, user_id: userId })
+      .first();
+    if (!existing) {
+      throw new AppError('Notification not found', 404, 'ERR_NOT_FOUND');
+    }
     await db('notifications')
       .where({ id: notificationId, user_id: userId })
       .update({ read_at: db.fn.now() });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Bell } from 'lucide-react';
 import { useNotifications } from '@/hooks/useNotifications';
 import NotificationPanel from './NotificationPanel';
@@ -6,10 +6,12 @@ import NotificationPanel from './NotificationPanel';
 export default function NotificationBell() {
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications();
   const [open, setOpen] = useState(false);
+  const bellRef = useRef<HTMLButtonElement>(null);
 
   return (
     <div className="relative">
       <button
+        ref={bellRef}
         onClick={() => setOpen((prev) => !prev)}
         className="relative flex items-center justify-center rounded-lg p-1.5 text-gray-600 hover:bg-gray-100 transition"
         aria-label="Notifications"
@@ -29,6 +31,7 @@ export default function NotificationBell() {
           onRead={markRead}
           onReadAll={markAllRead}
           onClose={() => setOpen(false)}
+          triggerRef={bellRef}
         />
       )}
     </div>
