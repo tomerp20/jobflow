@@ -11,6 +11,17 @@ const classificationSchema = z.object({
 
 export type EmailClassification = z.infer<typeof classificationSchema>;
 
+// Instantiate providers once at module level rather than on every call.
+// Warn at startup if the active provider's key is missing so misconfiguration
+// is caught early rather than surfacing as a cryptic SDK error at runtime.
+const activeProvider = process.env.LLM_PROVIDER ?? 'google';
+if (activeProvider === 'google' && !process.env.GOOGLE_AI_API_KEY) {
+  console.warn('[emailClassifier] GOOGLE_AI_API_KEY is not set — email classification will fail');
+}
+if (activeProvider === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
+  console.warn('[emailClassifier] ANTHROPIC_API_KEY is not set — email classification will fail');
+}
+
 const anthropicProvider = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const googleProvider = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_AI_API_KEY });
 
