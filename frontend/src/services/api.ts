@@ -230,10 +230,30 @@ export type GmailStatusData =
   | { connected: true; isValid: true; email: string; lastSyncAt: string | null }
   | { connected: true; isValid: false; email: string; lastSyncAt: string | null };
 
+export interface SyncSummary {
+  scanned: number;
+  moved: number;
+  ambiguous: number;
+  noMatch: number;
+  lowConfidence: number;
+  notRejection: number;
+}
+
 export const gmailApi = {
   getStatus: async (): Promise<GmailStatusData> => {
     const res = await api.get('/gmail/status');
     return snakeToCamel(res.data.data) as GmailStatusData;
+  },
+  getAuthUrl: async (): Promise<string> => {
+    const res = await api.get<{ url: string }>('/gmail/auth');
+    return res.data.url;
+  },
+  sync: async (): Promise<SyncSummary> => {
+    const res = await api.post('/gmail/sync');
+    return snakeToCamel(res.data.data) as SyncSummary;
+  },
+  disconnect: async (): Promise<void> => {
+    await api.delete('/gmail/disconnect');
   },
 };
 
