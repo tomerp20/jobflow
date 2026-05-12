@@ -12,9 +12,9 @@ function normalize(str: string): string {
 function isContainsMatch(cardCompany: string, extractedCompany: string): boolean {
   const a = normalize(cardCompany);
   const b = normalize(extractedCompany);
-  // Reject matches where the extracted company name is too short (≤3 chars)
-  // to avoid over-matching (e.g. "AI" matches every company name).
-  if (b.length <= 3) return false;
+  // Skip cards whose name has no ASCII alphanumeric characters (e.g. Hebrew-only names)
+  // and skip extracted names that are too short to be meaningful.
+  if (a.length === 0 || b.length <= 3) return false;
   return a.includes(b) || b.includes(a);
 }
 
