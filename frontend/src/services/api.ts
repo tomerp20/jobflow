@@ -224,4 +224,19 @@ export const remindersApi = {
   },
 };
 
+// Gmail API
+export const gmailApi = {
+  getStatus: async (): Promise<
+    | { connected: false }
+    | { connected: true; isValid: true; email: string; lastSyncAt: string | null }
+    | { connected: true; isValid: false; email: string; lastSyncAt: string | null }
+  > => {
+    const res = await api.get('/gmail/status');
+    return snakeToCamel(res.data.data) as
+      | { connected: false }
+      | { connected: true; isValid: true; email: string; lastSyncAt: string | null }
+      | { connected: true; isValid: false; email: string; lastSyncAt: string | null };
+  },
+};
+
 export default api;
