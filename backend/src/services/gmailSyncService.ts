@@ -1,4 +1,5 @@
 import db from '../config/database';
+import logger from '../config/logger';
 import { gmailService } from './gmailService';
 import { classifyEmail } from './emailClassifier';
 import { cardService } from './cardService';
@@ -11,6 +12,9 @@ function normalize(str: string): string {
 function isContainsMatch(cardCompany: string, extractedCompany: string): boolean {
   const a = normalize(cardCompany);
   const b = normalize(extractedCompany);
+  // Reject matches where the extracted company name is too short (≤3 chars)
+  // to avoid over-matching (e.g. "AI" matches every company name).
+  if (b.length <= 3) return false;
   return a.includes(b) || b.includes(a);
 }
 
@@ -26,25 +30,55 @@ export interface SyncSummary {
 export async function syncUserGmail(userId: string): Promise<SyncSummary> {
   const summary: SyncSummary = { scanned: 0, moved: 0, ambiguous: 0, noMatch: 0, lowConfidence: 0, notRejection: 0 };
 
+  const gmailToken = await db('gmail_tokens').where({ user_id: userId, is_valid: true }).first();
+  if (!gmailToken) return summary;
+
   const gmailClient = await gmailService.getValidClient(userId);
   if (!gmailClient) return summary;
 
-  const emails = await gmailService.fetchUnreadEmails(userId, gmailClient);
-  const rejectionStage = await db('stages').where({ user_id: userId, is_rejection_stage: true }).first();
+  const lastSyncAt: Date | null = gmailToken.last_sync_at ? new Date(gmailToken.last_sync_at) : null;
+  const emails = await gmailService.fetchUnreadEmails(gmailClient, lastSyncAt);
+
+  // Hoist both lookup queries above the loop to avoid per-email round-trips
+  const [rejectionStage, cards] = await Promise.all([
+    db('stages').where({ user_id: userId, is_rejection_stage: true }).first(),
+    db('cards')
+      .join('stages', 'cards.stage_id', 'stages.id')
+      .where({ 'cards.user_id': userId })
+      .where('stages.is_rejection_stage', false)
+      .select('cards.*', 'stages.name as stage_name'),
+  ]);
   if (!rejectionStage) return summary;
 
+  // Batch-check which message IDs have already been processed (avoids N+1)
+  const messageIds = emails.map(e => e.messageId);
+  const processedRows = messageIds.length > 0
+    ? await db('processed_emails')
+        .where({ user_id: userId })
+        .whereIn('gmail_message_id', messageIds)
+        .select('gmail_message_id')
+    : [];
+  const processedSet = new Set(processedRows.map((r: { gmail_message_id: string }) => r.gmail_message_id));
+
   for (const email of emails) {
-    const alreadyProcessed = await db('processed_emails')
-      .where({ user_id: userId, gmail_message_id: email.messageId })
-      .first();
-    if (alreadyProcessed) continue;
+    if (processedSet.has(email.messageId)) continue;
 
     summary.scanned++;
 
     let classification;
     try {
       classification = await classifyEmail(email.subject, email.body);
-    } catch {
+    } catch (err) {
+      logger.error('Email classification failed', { userId, messageId: email.messageId, error: err });
+      // Mark as classifier_error so this email is not retried indefinitely
+      await db('processed_emails').insert({
+        user_id: userId,
+        gmail_message_id: email.messageId,
+        subject: email.subject,
+        sender: email.sender,
+        received_at: email.receivedAt,
+        action: 'classifier_error',
+      }).catch(() => {});
       continue;
     }
 
@@ -81,12 +115,6 @@ export async function syncUserGmail(userId: string): Promise<SyncSummary> {
       summary.noMatch++;
       continue;
     }
-
-    const cards = await db('cards')
-      .join('stages', 'cards.stage_id', 'stages.id')
-      .where({ 'cards.user_id': userId })
-      .where('stages.is_rejection_stage', false)
-      .select('cards.*', 'stages.name as stage_name');
 
     const matches = cards.filter(c => isContainsMatch(c.company_name, classification.companyName!));
 

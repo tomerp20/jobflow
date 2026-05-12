@@ -1,8 +1,12 @@
 import { google } from 'googleapis';
+import jwt from 'jsonwebtoken';
 import db from '../config/database';
 import { notificationService } from './notificationService';
+import { AppError } from '../middleware/errorHandler';
 
 const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
+// OAuth state nonces expire after 10 minutes
+const OAUTH_STATE_TTL_S = 10 * 60;
 
 function createOAuthClient() {
   return new google.auth.OAuth2(
@@ -12,18 +16,49 @@ function createOAuthClient() {
   );
 }
 
+/**
+ * Creates a short-lived, signed JWT that embeds the userId.
+ * Used as the OAuth `state` parameter to prevent CSRF on the callback.
+ * The JWT is signed with JWT_SECRET and expires in 10 minutes.
+ */
+function createOAuthStateToken(userId: string): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new AppError('JWT_SECRET is not configured', 500, 'ERR_INTERNAL');
+  return jwt.sign({ userId, purpose: 'oauth_state' }, secret, { expiresIn: OAUTH_STATE_TTL_S });
+}
+
+/**
+ * Verifies an OAuth state JWT and returns the embedded userId.
+ * Throws AppError(400) if the token is missing, tampered with, or expired.
+ */
+function verifyOAuthStateToken(state: string): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new AppError('JWT_SECRET is not configured', 500, 'ERR_INTERNAL');
+  try {
+    const payload = jwt.verify(state, secret) as { userId: string; purpose: string };
+    if (payload.purpose !== 'oauth_state') throw new Error('wrong purpose');
+    return payload.userId;
+  } catch {
+    throw new AppError('Invalid or expired OAuth state', 400, 'ERR_INVALID_STATE');
+  }
+}
+
 export const gmailService = {
   getAuthUrl(userId: string): string {
     const oauth2Client = createOAuthClient();
+    const state = createOAuthStateToken(userId);
     return oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: SCOPES,
       prompt: 'consent',
-      state: userId,
+      state,
     });
   },
 
-  async handleCallback(code: string, userId: string): Promise<void> {
+  async handleCallback(code: string, state: string): Promise<void> {
+    // Verify the CSRF state token and extract the userId
+    const userId = verifyOAuthStateToken(state);
+
     const oauth2Client = createOAuthClient();
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
@@ -95,11 +130,11 @@ export const gmailService = {
     return google.gmail({ version: 'v1', auth: oauth2Client });
   },
 
-  async fetchUnreadEmails(userId: string, gmailClient: ReturnType<typeof google.gmail>) {
-    const token = await db('gmail_tokens').where({ user_id: userId }).first();
-    const sinceDate = token?.last_sync_at
-      ? new Date(token.last_sync_at)
-      : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  async fetchUnreadEmails(
+    gmailClient: ReturnType<typeof google.gmail>,
+    lastSyncAt: Date | null
+  ) {
+    const sinceDate = lastSyncAt ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const afterEpoch = Math.floor(sinceDate.getTime() / 1000);
 
     const listRes = await gmailClient.users.messages.list({

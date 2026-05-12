@@ -11,7 +11,11 @@ jobs:
     steps:
       - name: Trigger Gmail Sync
         run: |
-          curl -s -o /dev/null -w "%{http_code}" \
+          RESPONSE=$(curl --fail-with-body \
+            -s -w "\nHTTP_STATUS:%{http_code}" \
             -X POST "${{ secrets.RENDER_SYNC_URL }}/api/gmail/sync" \
             -H "Authorization: Bearer ${{ secrets.CRON_API_KEY }}" \
-            --fail
+            -H "Content-Type: application/json")
+          echo "$RESPONSE"
+          HTTP_CODE=$(echo "$RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+          echo "HTTP status: $HTTP_CODE"

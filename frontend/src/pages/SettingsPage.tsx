@@ -10,6 +10,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncSummary | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const location = useLocation();
 
   useEffect(() => {
@@ -33,20 +34,29 @@ export default function SettingsPage() {
   async function handleSync() {
     setSyncing(true);
     setSyncResult(null);
+    setSyncError(null);
     try {
       const result = await gmailApi.sync();
       setSyncResult(result);
       const updated = await gmailApi.getStatus();
       setGmailStatus(updated);
+    } catch {
+      setSyncError('Sync failed. Please try again.');
     } finally {
       setSyncing(false);
     }
   }
 
   async function handleDisconnect() {
-    await gmailApi.disconnect();
-    setGmailStatus({ connected: false });
-    setSyncResult(null);
+    if (!window.confirm('Disconnect Gmail? This will stop automatic rejection detection.')) return;
+    try {
+      await gmailApi.disconnect();
+      setGmailStatus({ connected: false });
+      setSyncResult(null);
+      setSyncError(null);
+    } catch {
+      setSyncError('Failed to disconnect. Please try again.');
+    }
   }
 
   return (
@@ -115,6 +125,9 @@ export default function SettingsPage() {
                   <p className="text-sm text-gray-600">
                     {syncResult.scanned} emails scanned · {syncResult.moved} card{syncResult.moved !== 1 ? 's' : ''} moved to Rejected
                   </p>
+                )}
+                {syncError && (
+                  <p className="text-sm text-red-600">{syncError}</p>
                 )}
                 <div className="flex items-center gap-3">
                   <button

@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { timingSafeEqual, createHash } from 'crypto';
 import db from '../config/database';
 import { authenticate } from '../middleware/auth';
 import { gmailService } from '../services/gmailService';
@@ -6,9 +7,19 @@ import { syncUserGmail } from '../services/gmailSyncService';
 
 const router = Router();
 
-router.get('/auth', authenticate, (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Constant-time string comparison to avoid timing side-channels when
+ * validating the CRON_API_KEY secret.
+ */
+function safeCompare(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+
+router.get('/auth', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const url = gmailService.getAuthUrl(req.user!.id);
+    const url = await gmailService.getAuthUrl(req.user!.id);
     res.json({ url });
   } catch (err) { next(err); }
 });
@@ -40,7 +51,7 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
   try {
     const cronKey = process.env.CRON_API_KEY;
     const authHeader = req.headers.authorization ?? '';
-    const isCron = cronKey && authHeader === `Bearer ${cronKey}`;
+    const isCron = !!cronKey && safeCompare(authHeader, `Bearer ${cronKey}`);
 
     if (isCron) {
       const tokens = await db('gmail_tokens').where({ is_valid: true }).select('user_id');
