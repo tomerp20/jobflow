@@ -1,5 +1,6 @@
 import { generateObject } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { z } from 'zod';
 
 const classificationSchema = z.object({
@@ -10,15 +11,17 @@ const classificationSchema = z.object({
 
 export type EmailClassification = z.infer<typeof classificationSchema>;
 
-// Instantiate the provider once at module level rather than on every call
 const anthropicProvider = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const googleProvider = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_AI_API_KEY });
 
 function getModel() {
-  const provider = process.env.LLM_PROVIDER ?? 'anthropic';
+  const provider = process.env.LLM_PROVIDER ?? 'google';
   switch (provider) {
     case 'anthropic':
-    default:
       return anthropicProvider('claude-3-haiku-20240307');
+    case 'google':
+    default:
+      return googleProvider('gemini-2.5-flash-lite');
   }
 }
 
