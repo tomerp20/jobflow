@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { Briefcase, LayoutDashboard, Columns3, CheckSquare, LogOut, User } from 'lucide-react';
+import { Briefcase, LayoutDashboard, Columns3, CheckSquare, LogOut, User, Settings } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import NotificationBell from './NotificationBell';
 
@@ -75,6 +75,14 @@ export default function Navbar() {
                 <p className="text-sm font-medium text-gray-900">{user?.name}</p>
                 <p className="text-xs text-gray-500 truncate">{user?.email}</p>
               </div>
+              <Link
+                to="/settings"
+                onClick={() => setShowMenu(false)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+              >
+                <Settings size={14} />
+                Settings
+              </Link>
               <button
                 onClick={() => {
                   setShowMenu(false);
