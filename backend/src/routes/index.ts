@@ -9,6 +9,7 @@ import todosRouter from './todos';
 import autocompleteRouter from './autocomplete';
 import eventsRouter from './events';
 import notificationsRouter from './notifications';
+import gmailRouter from './gmail';
 
 const router = Router();
 
@@ -27,5 +28,6 @@ router.use('/todos', todosRouter);
 router.use('/autocomplete', autocompleteRouter);
 router.use('/events', eventsRouter);
 router.use('/notifications', notificationsRouter);
+router.use('/gmail', gmailRouter);
 
 export default router;

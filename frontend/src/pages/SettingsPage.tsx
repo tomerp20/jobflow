@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react';
 import { Settings, Mail, CheckCircle, AlertTriangle, RefreshCw } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
+import { useLocation } from 'react-router-dom';
 import { gmailApi } from '@/services/api';
-import type { GmailStatusData } from '@/services/api';
+import type { GmailStatusData, SyncSummary } from '@/services/api';
 
 export default function SettingsPage() {
   const [gmailStatus, setGmailStatus] = useState<GmailStatusData>({ connected: false });
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<SyncSummary | null>(null);
+  const location = useLocation();
 
   useEffect(() => {
     gmailApi
@@ -14,12 +18,36 @@ export default function SettingsPage() {
       .then((data) => setGmailStatus(data))
       .catch(() => setGmailStatus({ connected: false }))
       .finally(() => setLoading(false));
-  }, []);
+  }, [location.search]);
 
   const isConnectedValid =
     gmailStatus.connected === true && gmailStatus.isValid === true;
   const isConnectedInvalid =
     gmailStatus.connected === true && gmailStatus.isValid === false;
+
+  async function handleConnect() {
+    const url = await gmailApi.getAuthUrl();
+    window.location.href = url;
+  }
+
+  async function handleSync() {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const result = await gmailApi.sync();
+      setSyncResult(result);
+      const updated = await gmailApi.getStatus();
+      setGmailStatus(updated);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleDisconnect() {
+    await gmailApi.disconnect();
+    setGmailStatus({ connected: false });
+    setSyncResult(null);
+  }
 
   return (
     <div className="p-6 space-y-6 max-w-3xl mx-auto">
@@ -62,9 +90,7 @@ export default function SettingsPage() {
                   Connect your Gmail account to automatically detect rejection emails and update your board.
                 </p>
                 <button
-                  onClick={() => {
-                    // TODO: wire OAuth
-                  }}
+                  onClick={handleConnect}
                   className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition"
                 >
                   <Mail size={15} />
@@ -85,20 +111,22 @@ export default function SettingsPage() {
                     ? formatDistanceToNow(parseISO(gmailStatus.lastSyncAt), { addSuffix: true })
                     : 'Never synced yet'}
                 </div>
+                {syncResult && (
+                  <p className="text-sm text-gray-600">
+                    {syncResult.scanned} emails scanned · {syncResult.moved} card{syncResult.moved !== 1 ? 's' : ''} moved to Rejected
+                  </p>
+                )}
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => {
-                      // TODO: wire sync
-                    }}
-                    className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition"
+                    onClick={handleSync}
+                    disabled={syncing}
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition disabled:opacity-60"
                   >
-                    <RefreshCw size={14} />
-                    Sync Now
+                    <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+                    {syncing ? 'Syncing…' : 'Sync Now'}
                   </button>
                   <button
-                    onClick={() => {
-                      // TODO: wire disconnect
-                    }}
+                    onClick={handleDisconnect}
                     className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:border-red-300 hover:text-red-600 transition"
                   >
                     Disconnect
@@ -110,9 +138,7 @@ export default function SettingsPage() {
             {/* State 3 reconnect button */}
             {isConnectedInvalid && (
               <button
-                onClick={() => {
-                  // TODO: wire OAuth
-                }}
+                onClick={handleConnect}
                 className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition"
               >
                 <Mail size={15} />

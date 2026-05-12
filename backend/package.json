@@ -17,6 +17,8 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.0",
+    "ai": "^4.0.0",
     "bcryptjs": "^2.4.3",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
@@ -24,11 +26,13 @@
     "express": "^4.21.0",
     "express-rate-limit": "^7.5.1",
     "express-validator": "^7.2.0",
+    "googleapis": "^140.0.0",
     "jsonwebtoken": "^9.0.2",
     "knex": "^3.1.0",
     "pg": "^8.13.0",
     "uuid": "^10.0.0",
-    "winston": "^3.14.0"
+    "winston": "^3.14.0",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

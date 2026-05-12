@@ -85,6 +85,7 @@ async function createDefaultStages(userId: string): Promise<void> {
     name,
     position: index,
     is_default: true,
+    is_rejection_stage: name === 'Rejected',
   }));
 
   await db('stages').insert(stages);

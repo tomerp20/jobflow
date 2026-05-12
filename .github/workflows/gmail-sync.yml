@@ -1,0 +1,17 @@
+name: Gmail Sync
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Gmail Sync
+        run: |
+          curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ secrets.RENDER_SYNC_URL }}/api/gmail/sync" \
+            -H "Authorization: Bearer ${{ secrets.CRON_API_KEY }}" \
+            --fail
