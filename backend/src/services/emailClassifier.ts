@@ -22,17 +22,24 @@ if (activeProvider === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
   console.warn('[emailClassifier] ANTHROPIC_API_KEY is not set — email classification will fail');
 }
 
-const anthropicProvider = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const googleProvider = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_AI_API_KEY });
+// Only instantiate the active provider's client — the inactive provider's API
+// key may be absent, and some SDKs validate at construction time.
+const anthropicProvider = activeProvider === 'anthropic'
+  ? createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  : null;
+const googleProvider = activeProvider === 'google'
+  ? createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_AI_API_KEY })
+  : null;
 
 function getModel() {
-  const provider = process.env.LLM_PROVIDER ?? 'google';
-  switch (provider) {
+  // Use the module-level constant — avoids re-reading env per call and keeps
+  // getModel() consistent with the startup warning above.
+  switch (activeProvider) {
     case 'anthropic':
-      return anthropicProvider('claude-3-haiku-20240307');
+      return anthropicProvider!('claude-3-haiku-20240307');
     case 'google':
     default:
-      return googleProvider('gemini-2.5-flash-lite');
+      return googleProvider!('gemini-2.5-flash-lite');
   }
 }
 

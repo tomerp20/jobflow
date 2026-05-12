@@ -45,8 +45,12 @@ function verifyOAuthStateToken(state: string): string {
 
 type GmailPart = { mimeType?: string | null; body?: { data?: string | null } | null; parts?: GmailPart[] | null };
 
-function extractTextBody(payload: GmailPart | null | undefined): string {
-  if (!payload) return '';
+// depth cap prevents stack overflow on adversarially deep MIME trees (RFC 2046
+// allows arbitrary nesting; real-world emails are at most 3–4 levels deep)
+const MAX_MIME_DEPTH = 10;
+
+function extractTextBody(payload: GmailPart | null | undefined, depth = 0): string {
+  if (!payload || depth > MAX_MIME_DEPTH) return '';
   if (payload.mimeType === 'text/plain' && payload.body?.data) {
     return Buffer.from(payload.body.data, 'base64').toString('utf-8');
   }
@@ -60,7 +64,7 @@ function extractTextBody(payload: GmailPart | null | undefined): string {
     // Recurse into nested multipart containers
     for (const part of payload.parts) {
       if (part.mimeType?.startsWith('multipart/')) {
-        const result = extractTextBody(part);
+        const result = extractTextBody(part, depth + 1);
         if (result) return result;
       }
     }
