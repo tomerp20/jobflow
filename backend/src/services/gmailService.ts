@@ -43,6 +43,38 @@ function verifyOAuthStateToken(state: string): string {
   }
 }
 
+type GmailPart = { mimeType?: string | null; body?: { data?: string | null } | null; parts?: GmailPart[] | null };
+
+function extractTextBody(payload: GmailPart | null | undefined): string {
+  if (!payload) return '';
+  if (payload.mimeType === 'text/plain' && payload.body?.data) {
+    return Buffer.from(payload.body.data, 'base64').toString('utf-8');
+  }
+  if (payload.parts) {
+    // Prefer text/plain at any depth
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/plain' && part.body?.data) {
+        return Buffer.from(part.body.data, 'base64').toString('utf-8');
+      }
+    }
+    // Recurse into nested multipart containers
+    for (const part of payload.parts) {
+      if (part.mimeType?.startsWith('multipart/')) {
+        const result = extractTextBody(part);
+        if (result) return result;
+      }
+    }
+    // Last resort: strip HTML tags from text/html part
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/html' && part.body?.data) {
+        const html = Buffer.from(part.body.data, 'base64').toString('utf-8');
+        return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+    }
+  }
+  return '';
+}
+
 export const gmailService = {
   getAuthUrl(userId: string): string {
     const oauth2Client = createOAuthClient();
@@ -159,13 +191,7 @@ export const gmailService = {
       const dateHeader = headers.find(h => h.name === 'Date')?.value;
       const receivedAt = dateHeader ? new Date(dateHeader) : new Date();
 
-      let body = '';
-      const parts = full.data.payload?.parts ?? [];
-      const textPart = parts.find(p => p.mimeType === 'text/plain') ?? full.data.payload;
-      if (textPart?.body?.data) {
-        body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
-      }
-      body = body.slice(0, 2000);
+      const body = extractTextBody(full.data.payload).slice(0, 2000);
 
       emails.push({ messageId: msg.id!, subject, sender, body, receivedAt });
     }
