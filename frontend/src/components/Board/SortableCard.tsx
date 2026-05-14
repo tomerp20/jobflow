@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Card } from '@/types';
@@ -24,6 +24,10 @@ function SortableCard({ card, onCardClick }: SortableCardProps) {
     transition,
   };
 
+  const handleClick = useCallback(() => {
+    if (!isDragging) onCardClick(card.id);
+  }, [isDragging, onCardClick, card.id]);
+
   return (
     <div
       ref={setNodeRef}
@@ -31,9 +35,7 @@ function SortableCard({ card, onCardClick }: SortableCardProps) {
       {...attributes}
       {...listeners}
       className={`board-card ${isDragging ? 'board-card-ghost' : ''}`}
-      onClick={() => {
-        if (!isDragging) onCardClick(card.id);
-      }}
+      onClick={handleClick}
     >
       <CardPreview card={card} />
     </div>

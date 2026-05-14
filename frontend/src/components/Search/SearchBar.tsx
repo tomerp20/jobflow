@@ -98,7 +98,7 @@ export default function SearchBar({ filters, onFiltersChange, searchQuery, onSea
         >
           <SlidersHorizontal size={14} />
           Filters
-          {hasActiveFilters && (
+          {[filters.stageId, filters.priority, filters.workMode].filter(Boolean).length > 0 && (
             <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary-600 text-[10px] text-white">
               {[filters.stageId, filters.priority, filters.workMode].filter(Boolean).length}
             </span>

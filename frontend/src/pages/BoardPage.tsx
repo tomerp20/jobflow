@@ -89,19 +89,19 @@ export default function BoardPage() {
     }
   }, [fetchData]);
 
-  const handleCardCreated = (card: Card) => {
+  const handleCardCreated = useCallback((card: Card) => {
     setCards((prev) => [...prev, card]);
     setShowCreateForm(false);
-  };
+  }, []);
 
-  const handleCardUpdated = (updatedCard: Card) => {
+  const handleCardUpdated = useCallback((updatedCard: Card) => {
     setCards((prev) => prev.map((c) => (c.id === updatedCard.id ? updatedCard : c)));
-  };
+  }, []);
 
-  const handleCardDeleted = (cardId: string) => {
+  const handleCardDeleted = useCallback((cardId: string) => {
     setCards((prev) => prev.filter((c) => c.id !== cardId));
     setSelectedCardId(null);
-  };
+  }, []);
 
   const handleAddCard = useCallback((stageId: string) => {
     setCreateStageId(stageId);
@@ -120,7 +120,7 @@ export default function BoardPage() {
     setShowStageForm(true);
   }, []);
 
-  const handleStageSaved = (saved: Stage) => {
+  const handleStageSaved = useCallback((saved: Stage) => {
     if (editingStage) {
       setStages((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
     } else {
@@ -128,13 +128,13 @@ export default function BoardPage() {
     }
     setShowStageForm(false);
     setEditingStage(undefined);
-  };
+  }, [editingStage]);
 
   const handleDeleteStage = useCallback((stage: Stage) => {
     setDeleteConfirmStage(stage);
   }, []);
 
-  const confirmDeleteStage = async () => {
+  const confirmDeleteStage = useCallback(async () => {
     if (!deleteConfirmStage) return;
     try {
       await stagesApi.deleteStage(deleteConfirmStage.id);
@@ -144,7 +144,7 @@ export default function BoardPage() {
       console.error('Failed to delete stage:', err);
       alert(err.response?.data?.error?.message || 'Failed to delete stage');
     }
-  };
+  }, [deleteConfirmStage, fetchData]);
 
   const handleResizeStage = useCallback(async (stageId: string, width: number) => {
     setStages((prev) => prev.map((s) => (s.id === stageId ? { ...s, width } : s)));
@@ -195,7 +195,8 @@ export default function BoardPage() {
       <div className="flex-1 px-4 pb-4">
         <Board
           stages={stages}
-          cards={filteredCards}
+          cards={cards}
+          displayCards={filteredCards}
           loading={loading}
           onMoveCard={handleMoveCard}
           onCardClick={setSelectedCardId}
