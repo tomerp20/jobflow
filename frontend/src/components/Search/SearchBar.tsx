@@ -1,46 +1,34 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { CardFilters, Stage } from '@/types';
 import { Search, X, SlidersHorizontal } from 'lucide-react';
 import { useAutocomplete } from '@/hooks/useAutocomplete';
 import AutocompleteDropdown from '@/components/AutocompleteDropdown';
 
 interface SearchBarProps {
-  filters: CardFilters;
-  onFiltersChange: (filters: CardFilters) => void;
+  filters: Omit<CardFilters, 'search'>;
+  onFiltersChange: (filters: Omit<CardFilters, 'search'>) => void;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
   stages: Stage[];
 }
 
-export default function SearchBar({ filters, onFiltersChange, stages }: SearchBarProps) {
-  const [searchText, setSearchText] = useState(filters.search || '');
+export default function SearchBar({ filters, onFiltersChange, searchQuery, onSearchChange, stages }: SearchBarProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const { suggestions, isLoading, triggerInit, query } = useAutocomplete();
 
+  // Drive the trie autocomplete from the controlled searchQuery prop
   useEffect(() => {
-    debounceRef.current = setTimeout(() => {
-      const newSearch = searchText || undefined;
-      if (newSearch !== filters.search) {
-        onFiltersChange({ ...filters, search: newSearch });
-      }
-    }, 300);
-    return () => clearTimeout(debounceRef.current);
-  }, [searchText]);
-
-  useEffect(() => {
-    if (!searchText) return;
-    query(searchText);
-  }, [searchText, query]);
+    if (!searchQuery) return;
+    query(searchQuery);
+  }, [searchQuery, query]);
 
   const handleSelect = useCallback(
     (word: string) => {
-      setSearchText(word);
+      onSearchChange(word);
       setInputFocused(false);
-      // Cancel the pending debounce and fire immediately
-      clearTimeout(debounceRef.current);
-      onFiltersChange({ ...filters, search: word || undefined });
     },
-    [filters, onFiltersChange],
+    [onSearchChange],
   );
 
   const handleDismiss = useCallback(() => {
@@ -49,10 +37,10 @@ export default function SearchBar({ filters, onFiltersChange, stages }: SearchBa
 
   const showDropdown = inputFocused && (isLoading || suggestions.length > 0);
 
-  const hasActiveFilters = filters.stageId || filters.priority || filters.workMode;
+  const hasActiveFilters = filters.stageId || filters.priority || filters.workMode || searchQuery;
 
   const clearFilters = () => {
-    setSearchText('');
+    onSearchChange('');
     setInputFocused(false);
     onFiltersChange({});
   };
@@ -72,8 +60,8 @@ export default function SearchBar({ filters, onFiltersChange, stages }: SearchBa
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
             onFocus={() => {
               setInputFocused(true);
               triggerInit();
@@ -89,9 +77,9 @@ export default function SearchBar({ filters, onFiltersChange, stages }: SearchBa
               onDismiss={handleDismiss}
             />
           )}
-          {searchText && (
+          {searchQuery && (
             <button
-              onClick={() => setSearchText('')}
+              onClick={() => onSearchChange('')}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
             >
               <X size={14} />

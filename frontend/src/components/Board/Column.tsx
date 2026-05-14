@@ -136,7 +136,7 @@ export default function Column({ stage, cards, onCardClick, onAddCard, onEditSta
       <SortableContext items={cardIds} strategy={verticalListSortingStrategy}>
         <div ref={setNodeRef} className="board-column-cards min-h-[60px]">
           {cards.map((card) => (
-            <SortableCard key={card.id} card={card} onClick={() => onCardClick(card.id)} />
+            <SortableCard key={card.id} card={card} onCardClick={onCardClick} />
           ))}
         </div>
       </SortableContext>

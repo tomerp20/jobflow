@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, memo } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -33,7 +33,7 @@ interface BoardProps {
 
 type DragType = 'card' | 'column' | null;
 
-export default function Board({
+function Board({
   stages, cards, loading, onMoveCard, onCardClick, onAddCard,
   onEditStage, onDeleteStage, onReorderStages, onResizeStage, onAddStage,
 }: BoardProps) {
@@ -219,3 +219,5 @@ export default function Board({
     </DndContext>
   );
 }
+
+export default memo(Board);
