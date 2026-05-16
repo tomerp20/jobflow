@@ -98,9 +98,18 @@ function Board({
     return m;
   }, [sortedStages, onAddCard]);
 
-  const noop = useCallback(() => {}, []);
+  // noop typed to match (stage: Stage) => void so it satisfies onEditStage / onDeleteStage.
+  const noop = useCallback((_stage: Stage) => {}, []);
+  // Separate no-arg noop used as fallback for onAddCard (() => void).
+  const noopVoid = useCallback(() => {}, []);
 
-  const handleDragStart = (event: DragStartEvent) => {
+  const resetDragState = useCallback(() => {
+    setActiveCard(null);
+    setActiveColumn(null);
+    setDragType(null);
+  }, []);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
     const activeId = event.active.id as string;
 
     if (activeId.startsWith('column-')) {
@@ -117,9 +126,9 @@ function Board({
         setDragType('card');
       }
     }
-  };
+  }, [cards, stages]);
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
 
     if (dragType === 'column' && over && onReorderStages) {
@@ -177,13 +186,7 @@ function Board({
     }
 
     resetDragState();
-  };
-
-  const resetDragState = () => {
-    setActiveCard(null);
-    setActiveColumn(null);
-    setDragType(null);
-  };
+  }, [dragType, sortedStages, cards, stages, getCardsByStage, onReorderStages, onMoveCard, resetDragState]);
 
   if (loading) {
     return (
@@ -219,7 +222,7 @@ function Board({
               stage={stage}
               cards={getDisplayCardsByStage(stage.id)}
               onCardClick={onCardClick}
-              onAddCard={addCardHandlers.get(stage.id)!}
+              onAddCard={addCardHandlers.get(stage.id) ?? noopVoid}
               onEditStage={onEditStage ?? noop}
               onDeleteStage={onDeleteStage ?? noop}
               onResizeStage={onResizeStage}
