@@ -12,6 +12,7 @@
     "migrate:prod": "knex migrate:latest --knexfile knexfile.prod.cjs",
     "migrate:rollback": "knex migrate:rollback --knexfile knexfile.ts",
     "seed": "knex seed:run --knexfile knexfile.ts",
+    "seed:test": "ts-node --transpile-only --skip-project --compiler-options '{\"module\":\"CommonJS\",\"esModuleInterop\":true,\"target\":\"ES2020\"}' scripts/seed-test.ts",
     "test": "jest --forceExit --detectOpenHandles",
     "test:watch": "jest --watch",
     "lint": "eslint src/"

@@ -10,6 +10,7 @@ build/
 .env
 .env.local
 .env.*.local
+.env.test
 !.env.example
 
 # IDE / Editor
@@ -34,6 +35,8 @@ pnpm-debug.log*
 
 # Test coverage
 coverage/
+playwright-report/
+test-results/
 
 # Docker persistent volumes
 pgdata/
