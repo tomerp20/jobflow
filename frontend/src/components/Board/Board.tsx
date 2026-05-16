@@ -1,4 +1,4 @@
-import { useState, useCallback, memo } from 'react';
+import { useState, useCallback, useMemo, memo } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -50,26 +50,55 @@ function Board({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Full card set — used for DnD position calculations to avoid position corruption when search filters are active.
-  const getCardsByStage = useCallback(
-    (stageId: string) =>
-      cards
-        .filter((c) => c.stageId === stageId)
-        .sort((a, b) => a.position - b.position),
-    [cards]
-  );
+  // Memoize sorted stages and column ids so they don't re-create on every render.
+  const sortedStages = useMemo(() => stages.slice().sort((a, b) => a.position - b.position), [stages]);
+  const columnIds = useMemo(() => sortedStages.map((s) => `column-${s.id}`), [sortedStages]);
 
-  // Display card set — used for rendering per column (may be a filtered subset).
-  const getDisplayCardsByStage = useCallback(
-    (stageId: string) =>
-      renderCards
-        .filter((c) => c.stageId === stageId)
-        .sort((a, b) => a.position - b.position),
-    [renderCards]
-  );
+  // Precompute maps of cards per stage for both the full `cards` set (used for
+  // DnD calculations) and the `renderCards` set (used for rendering/filtering).
+  const cardsByStage = useMemo(() => {
+    const map = new Map<string, Card[]>();
+    for (const s of sortedStages) {
+      map.set(
+        s.id,
+        cards
+          .filter((c) => c.stageId === s.id)
+          .slice()
+          .sort((a, b) => a.position - b.position)
+      );
+    }
+    return map;
+  }, [cards, sortedStages]);
 
-  const sortedStages = [...stages].sort((a, b) => a.position - b.position);
-  const columnIds = sortedStages.map((s) => `column-${s.id}`);
+  const displayCardsByStage = useMemo(() => {
+    const map = new Map<string, Card[]>();
+    for (const s of sortedStages) {
+      map.set(
+        s.id,
+        renderCards
+          .filter((c) => c.stageId === s.id)
+          .slice()
+          .sort((a, b) => a.position - b.position)
+      );
+    }
+    return map;
+  }, [renderCards, sortedStages]);
+
+  // Small helpers that read from the memoized maps — stable across renders
+  // unless their inputs change.
+  const getCardsByStage = useCallback((stageId: string) => cardsByStage.get(stageId) ?? [], [cardsByStage]);
+  const getDisplayCardsByStage = useCallback((stageId: string) => displayCardsByStage.get(stageId) ?? [], [displayCardsByStage]);
+
+  // Stable per-stage handlers to avoid creating inline functions during map.
+  const addCardHandlers = useMemo(() => {
+    const m = new Map<string, () => void>();
+    for (const s of sortedStages) {
+      m.set(s.id, () => onAddCard(s.id));
+    }
+    return m;
+  }, [sortedStages, onAddCard]);
+
+  const noop = useCallback(() => {}, []);
 
   const handleDragStart = (event: DragStartEvent) => {
     const activeId = event.active.id as string;
@@ -190,9 +219,9 @@ function Board({
               stage={stage}
               cards={getDisplayCardsByStage(stage.id)}
               onCardClick={onCardClick}
-              onAddCard={() => onAddCard(stage.id)}
-              onEditStage={onEditStage || (() => {})}
-              onDeleteStage={onDeleteStage || (() => {})}
+              onAddCard={addCardHandlers.get(stage.id)!}
+              onEditStage={onEditStage ?? noop}
+              onDeleteStage={onDeleteStage ?? noop}
               onResizeStage={onResizeStage}
             />
           ))}

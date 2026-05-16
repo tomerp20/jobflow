@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useDeferredValue } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { stagesApi, cardsApi } from '@/services/api';
 import type { Stage, Card, CardFilters } from '@/types';
 import Board from '@/components/Board/Board';
@@ -9,6 +9,7 @@ import CardForm from '@/components/Card/CardForm';
 import StageForm from '@/components/Board/StageForm';
 import TodoPanel from '@/components/Todo/TodoPanel';
 import { useCardEvents } from '@/hooks/useCardEvents';
+import useDebouncedValue from '@/hooks/useDebouncedValue';
 
 type NonSearchFilters = Omit<CardFilters, 'search'>;
 
@@ -60,13 +61,12 @@ export default function BoardPage() {
     fetchData();
   }, [fetchData]);
 
-  // deferredSearch lags behind searchQuery during rapid typing.
-  // filteredCards only recomputes when deferredSearch settles, keeping
-  // the input responsive and protecting the Board tree from mid-typing re-renders.
-  const deferredSearch = useDeferredValue(searchQuery);
+  // Debounce the search input so heavy filtering only runs after typing pauses.
+  // This decouples immediate typing UI from expensive `Board` renders.
+  const debouncedSearch = useDebouncedValue(searchQuery, 180);
   const filteredCards = useMemo(
-    () => cards.filter((card) => matchesSearch(card, deferredSearch)),
-    [cards, deferredSearch],
+    () => cards.filter((card) => matchesSearch(card, debouncedSearch)),
+    [cards, debouncedSearch],
   );
 
   const handleMoveCard = useCallback(async (cardId: string, newStageId: string, newPosition: number) => {
@@ -107,6 +107,10 @@ export default function BoardPage() {
     setCreateStageId(stageId);
     setShowCreateForm(true);
   }, []);
+
+  // Stable wrapper for card click to avoid passing raw state setters
+  // which could (rarely) change identity in some React runtimes.
+  const handleCardClick = useCallback((id: string) => setSelectedCardId(id), []);
 
   // ── Stage handlers ──────────────────────────────────────────────────────────
 
@@ -199,7 +203,7 @@ export default function BoardPage() {
           displayCards={filteredCards}
           loading={loading}
           onMoveCard={handleMoveCard}
-          onCardClick={setSelectedCardId}
+          onCardClick={handleCardClick}
           onAddCard={handleAddCard}
           onEditStage={handleEditStage}
           onDeleteStage={handleDeleteStage}
