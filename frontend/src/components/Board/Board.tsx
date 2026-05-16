@@ -1,4 +1,4 @@
-import { useState, useCallback, memo } from 'react';
+import { useState, useMemo, memo } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -13,7 +13,6 @@ import {
 import { SortableContext, sortableKeyboardCoordinates, horizontalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import type { Stage, Card } from '@/types';
 import SortableColumn from './SortableColumn';
-import Column from './Column';
 import CardPreview from '@/components/Card/CardPreview';
 import { Plus } from 'lucide-react';
 
@@ -51,25 +50,29 @@ function Board({
   );
 
   // Full card set — used for DnD position calculations to avoid position corruption when search filters are active.
-  const getCardsByStage = useCallback(
-    (stageId: string) =>
-      cards
-        .filter((c) => c.stageId === stageId)
-        .sort((a, b) => a.position - b.position),
-    [cards]
-  );
+  const cardsByStage = useMemo(() => {
+    const m = new Map<string, Card[]>();
+    for (const c of cards) {
+      if (!m.has(c.stageId)) m.set(c.stageId, []);
+      m.get(c.stageId)!.push(c);
+    }
+    for (const arr of m.values()) arr.sort((a, b) => a.position - b.position);
+    return m;
+  }, [cards]);
 
   // Display card set — used for rendering per column (may be a filtered subset).
-  const getDisplayCardsByStage = useCallback(
-    (stageId: string) =>
-      renderCards
-        .filter((c) => c.stageId === stageId)
-        .sort((a, b) => a.position - b.position),
-    [renderCards]
-  );
+  const displayCardsByStage = useMemo(() => {
+    const m = new Map<string, Card[]>();
+    for (const c of renderCards) {
+      if (!m.has(c.stageId)) m.set(c.stageId, []);
+      m.get(c.stageId)!.push(c);
+    }
+    for (const arr of m.values()) arr.sort((a, b) => a.position - b.position);
+    return m;
+  }, [renderCards]);
 
-  const sortedStages = [...stages].sort((a, b) => a.position - b.position);
-  const columnIds = sortedStages.map((s) => `column-${s.id}`);
+  const sortedStages = useMemo(() => [...stages].sort((a, b) => a.position - b.position), [stages]);
+  const columnIds = useMemo(() => sortedStages.map((s) => `column-${s.id}`), [sortedStages]);
 
   const handleDragStart = (event: DragStartEvent) => {
     const activeId = event.active.id as string;
@@ -125,7 +128,7 @@ function Board({
 
       if (isOverColumn) {
         targetStageId = overId;
-        const stageCards = getCardsByStage(overId);
+        const stageCards = cardsByStage.get(overId) ?? [];
         targetPosition = stageCards.length;
       } else {
         const overCard = cards.find((c) => c.id === overId);
@@ -134,7 +137,7 @@ function Board({
           return;
         }
         targetStageId = overCard.stageId;
-        const stageCards = getCardsByStage(targetStageId);
+        const stageCards = cardsByStage.get(targetStageId) ?? [];
         const overIndex = stageCards.findIndex((c) => c.id === overId);
         targetPosition = overIndex >= 0 ? overIndex : stageCards.length;
       }
@@ -188,11 +191,11 @@ function Board({
             <SortableColumn
               key={stage.id}
               stage={stage}
-              cards={getDisplayCardsByStage(stage.id)}
+              cards={displayCardsByStage.get(stage.id) ?? []}
               onCardClick={onCardClick}
               onAddCard={() => onAddCard(stage.id)}
-              onEditStage={onEditStage || (() => {})}
-              onDeleteStage={onDeleteStage || (() => {})}
+              onEditStage={onEditStage}
+              onDeleteStage={onDeleteStage}
               onResizeStage={onResizeStage}
             />
           ))}
@@ -221,7 +224,7 @@ function Board({
               <h3 className="text-sm font-semibold text-gray-700">{activeColumn.name}</h3>
             </div>
             <div className="p-2 space-y-2">
-              {getCardsByStage(activeColumn.id).slice(0, 3).map((card) => (
+              {(cardsByStage.get(activeColumn.id) ?? []).slice(0, 3).map((card) => (
                 <div key={card.id} className="board-card">
                   <CardPreview card={card} />
                 </div>

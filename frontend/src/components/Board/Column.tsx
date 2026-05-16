@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import type { Stage, Card } from '@/types';
@@ -16,42 +16,51 @@ interface ColumnProps {
   dragHandleProps?: Record<string, unknown>;
 }
 
-export default function Column({ stage, cards, onCardClick, onAddCard, onEditStage, onDeleteStage, onResizeStage, dragHandleProps }: ColumnProps) {
+function Column({ stage, cards, onCardClick, onAddCard, onEditStage, onDeleteStage, onResizeStage, dragHandleProps }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [resizeWidth, setResizeWidth] = useState<number | null>(null);
-  const lastWidthRef = useRef(0);
+  const isResizingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
 
   const columnWidth = resizeWidth ?? stage.width ?? 320;
 
-  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+  const handleResizeMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const startX = e.clientX;
-    const startW = columnWidth;
-    lastWidthRef.current = startW;
+    isResizingRef.current = true;
+    startXRef.current = e.clientX;
+    startWidthRef.current = columnWidth;
+  };
 
+  useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      const delta = e.clientX - startX;
-      const newWidth = Math.min(800, Math.max(200, startW + delta));
-      lastWidthRef.current = newWidth;
+      if (!isResizingRef.current) return;
+      const delta = e.clientX - startXRef.current;
+      const newWidth = Math.min(800, Math.max(200, startWidthRef.current + delta));
       setResizeWidth(newWidth);
     };
 
     const handleMouseUp = () => {
-      const finalWidth = lastWidthRef.current;
-      setResizeWidth(null);
-      if (onResizeStage && finalWidth !== (stage.width ?? 320)) {
-        onResizeStage(stage.id, finalWidth);
-      }
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      if (!isResizingRef.current) return;
+      isResizingRef.current = false;
+      setResizeWidth((finalWidth) => {
+        if (onResizeStage && finalWidth !== null && finalWidth !== (stage.width ?? 320)) {
+          onResizeStage(stage.id, finalWidth);
+        }
+        return null;
+      });
     };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-  }, [columnWidth, onResizeStage, stage.id, stage.width]);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [onResizeStage, stage.id, stage.width]);
 
   const cardIds = cards.map((c) => c.id);
 
@@ -150,3 +159,5 @@ export default function Column({ stage, cards, onCardClick, onAddCard, onEditSta
     </div>
   );
 }
+
+export default memo(Column);
