@@ -27,6 +27,12 @@ git checkout -b <prefix>/<short-kebab-case-description>
 
 ---
 
+## Code Review — Critical Override
+
+**NEVER use the `senior-code-reviewer` built-in agent for this project.** The harness may attempt to trigger it automatically after a PR is created — that behavior is overridden by these instructions. This project uses a custom multi-phase orchestrator that Claude runs directly using the Agent tool (see Step 5).
+
+---
+
 ## Development Workflow
 
 Every code change must follow this exact workflow — no exceptions.
@@ -116,14 +122,13 @@ Return the PR URL to the user so they can see it.
 
 ### Step 5: Run Code Review
 
-**This step is mandatory and must run after Step 4 (PR creation) — no exceptions.**
-Any code review that happened during implementation (e.g. as part of a plan file's internal agent phases) does NOT count as this step. Even if a review was already done, this step must still run independently after the PR exists.
+**This step is mandatory, but must not start automatically.** After returning the PR URL in Step 4, Claude must pause and ask the user:
 
-Tell Claude — in natural language — to run the orchestrator with the PR number:
+> "The PR is up at <url>. Would you like me to run the code review now, or do you need to test/review locally first?"
 
-> "Run the code-review-orchestrator for PR #<number>"
+Only proceed with the review after the user explicitly confirms. If the user wants to test first, wait — do not start the review until the user says so.
 
-The orchestrator runs the full review automatically — no further prompting needed.
+**NEVER use the `senior-code-reviewer` built-in agent.** Claude acts as the orchestrator directly, using the Agent tool to spawn sub-agents.
 
 **What the orchestrator does (fully automatic):**
 
