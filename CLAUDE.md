@@ -114,60 +114,49 @@ Return the PR URL to the user so they can see it.
 
 ---
 
-### Step 5: Run Code Review Agent
+### Step 5: Run Code Review
 
 **This step is mandatory and must run after Step 4 (PR creation) — no exceptions.**
 Any code review that happened during implementation (e.g. as part of a plan file's internal agent phases) does NOT count as this step. Even if a review was already done, this step must still run independently after the PR exists.
 
-The goal is that the human can see the entire review process directly on GitHub — review comments first, then a follow-up commit with the fixes. The sequence must always be:
+Tell Claude — in natural language — to run the orchestrator with the PR number:
 
-1. Post review comments on the PR
-2. Fix the issues
-3. Push a fix commit
+> "Run the code-review-orchestrator for PR #<number>"
 
-**Never commit fixes before posting the review comments.** The comments must appear on GitHub before the fix commit, so the human can see what was found and why it was fixed.
+The orchestrator runs the full review automatically — no further prompting needed.
 
-After the PR is created, run a Code Review agent on the feature branch changes. The agent must:
+**What the orchestrator does (fully automatic):**
 
-**5a. Review the diff** and evaluate:
-- **Best practices** — idiomatic code, consistency with the existing codebase
-- **Code efficiency** — unnecessary re-renders, N+1 queries, redundant operations
-- **Security issues** — XSS, injection, exposed secrets, insecure defaults, OWASP Top 10
-- **Code quality** — readability, naming, dead code, missing error handling at system boundaries
+**Phase 1 — Review (parallel):**
+- Detects which files changed: frontend, backend, or both
+- Spawns `react-code-reviewer` if frontend files changed
+- Spawns `backend-code-reviewer` if backend files changed
+- Performs security review itself (OWASP, secrets, auth, CORS, injection)
+- Each agent posts its own findings: a summary comment + inline line-level comments on the PR
+- All agents run in parallel; Phase 2 does not start until all Phase 1 agents finish
 
-**5b. Post review comments on GitHub** using `gh pr review` — before making any fixes. Use `--comment` to post inline comments and a general summary. Every issue found must appear as a comment on the PR. If no issues are found, post a comment confirming the review passed.
+**Phase 2 — Fix (parallel, after all reviews):**
+- Each domain agent reads the full PR conversation
+- Each fixes all issues in its domain (all severities)
+- Fixes are skipped if they risk breaking other features; tests are run after each fix; failing tests revert that specific fix and leave it as a PR comment
+- Each agent pushes its own fix commit
+- Orchestrator does a verification pass on all fix commits
 
-```bash
-gh pr review <PR-number> --comment --body "..."
-```
+**Phase 3 — Final status:**
+- Orchestrator posts a summary table: which agents ran, how many issues found, how many fixed, what was skipped
+- Skipped fixes are listed for human resolution
 
-**5c. Fix all issues found**, then push a fix commit on the feature branch:
+**The human only needs to act if:**
+- An ambiguous file is found (orchestrator will ask in chat — answer is cached for future PRs)
+- A fix was skipped due to cross-cutting risk (left as a PR comment)
 
-```bash
-git add <files>
-git commit -m "$(cat <<'EOF'
-fix: address code review findings
-
-- <issue 1 and why it was fixed>
-- <issue 2 and why it was fixed>
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-EOF
-)"
-git push origin <branch-name>
-```
-
-If there are no issues, skip the fix commit — but still post the passing review comment in 5b.
-
-After the fix commit is pushed, the agent summarizes:
-1. What issues were found and posted as review comments
-2. What was fixed and committed
+**Never commit fixes before posting review comments.** The GitHub comment trail must show findings first, then fixes.
 
 ---
 
 ### Step 6: Work is Done — Await Human Review
 
-After the code review agent finishes, the workflow is complete.
+After the orchestrator finishes, the workflow is complete.
 
 **Claude must never merge the feature branch into main.**
 Only the human can approve and merge the PR. This is a hard rule.
@@ -183,7 +172,5 @@ Only the human can approve and merge the PR. This is a hard rule.
 | 2 | Claude | Implement the change |
 | 3 | Claude | Commit with clear message |
 | 4 | Claude | Push and create PR to main |
-| 5a | Claude (agent) | Review diff — evaluate best practices, efficiency, security, quality |
-| 5b | Claude (agent) | Post all findings as GitHub PR review comments (before any fixes) |
-| 5c | Claude (agent) | Fix issues + push fix commit (or confirm passing if none found) |
+| 5 | `code-review-orchestrator` | Phase 1: parallel review (security + domain specialists) → Phase 2: parallel fixes + verification → Phase 3: final status table posted to PR |
 | 6 | Human | Review PR and merge when satisfied |
