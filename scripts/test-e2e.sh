@@ -35,7 +35,7 @@ echo "--- Starting backend ---"
 (
   cd "$ROOT/backend"
   DATABASE_URL="$TEST_DATABASE_URL" \
-  JWT_SECRET="${JWT_SECRET:-test-secret-for-e2e}" \
+  JWT_SECRET="${JWT_SECRET:-$(openssl rand -hex 32)}" \
   NODE_ENV=production \
   PORT=3001 \
   node dist/server.js

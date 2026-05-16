@@ -7,32 +7,37 @@
  */
 import knex from 'knex';
 import bcrypt from 'bcryptjs';
-
-export const TEST_USER_EMAIL = 'test@jobflow.io';
-export const TEST_USER_PASSWORD = 'Test1234!';
-export const TEST_USER_NAME = 'Test User';
-
-const DEFAULT_STAGES = [
-  'Wishlist',
-  'Applied',
-  'Recruiter Call',
-  'Technical Screen',
-  'Home Assignment',
-  'Final Interview',
-  'Offer',
-  'Rejected',
-  'Accepted',
-];
+import { TEST_USER_EMAIL, TEST_USER_PASSWORD, TEST_USER_NAME, DEFAULT_STAGES } from '../../e2e/constants';
 
 const dbUrl = process.env.TEST_DATABASE_URL;
 if (!dbUrl) {
-  console.error('TEST_DATABASE_URL is not set.');
+  console.error('ERROR: TEST_DATABASE_URL is not set.');
+  process.exit(1);
+}
+
+// Safety guard: refuse to truncate a database that does not look like a test
+// instance. This prevents an accidental .env copy-paste from wiping production.
+// Set ALLOW_PROD_SEED=1 to bypass (e.g. a legitimately named test DB on prod infra).
+const looksLikeTestDb =
+  dbUrl.includes('test') ||
+  dbUrl.includes('neon.tech') ||
+  dbUrl.includes('localhost') ||
+  dbUrl.includes('127.0.0.1');
+
+if (!looksLikeTestDb && process.env.ALLOW_PROD_SEED !== '1') {
+  console.error(
+    'ERROR: TEST_DATABASE_URL does not appear to point to a test database.\n' +
+      'Set ALLOW_PROD_SEED=1 to bypass this check.',
+  );
   process.exit(1);
 }
 
 const db = knex({
   client: 'pg',
-  connection: { connectionString: dbUrl, ssl: { rejectUnauthorized: false } },
+  connection: {
+    connectionString: dbUrl,
+    ssl: { rejectUnauthorized: false },
+  },
 });
 
 async function seed(): Promise<void> {

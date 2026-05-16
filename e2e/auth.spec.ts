@@ -5,8 +5,8 @@ test('user logs in and lands on the Board', async ({ page }) => {
   await login(page);
 
   await expect(page).toHaveURL('/');
-  // Board renders at least one Stage column after a successful login.
-  await expect(page.locator('h3').first()).toBeVisible();
+  // Board has rendered at least the first Stage column (Wishlist) after login.
+  await expect(page.locator('h3', { hasText: DEFAULT_STAGES[0] })).toBeVisible();
 });
 
 test('all expected Stages are visible on the Board after login', async ({ page }) => {

@@ -8,6 +8,8 @@ jobs:
   e2e:
     name: Playwright E2E
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -16,10 +18,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            backend/package-lock.json
-            frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install root deps
         run: npm ci
@@ -36,7 +35,7 @@ jobs:
         run: npx playwright install chromium --with-deps
 
       - name: Run backend migrations
-        run: npx ts-node ./node_modules/.bin/knex migrate:latest --knexfile knexfile.ts
+        run: npm run migrate
         working-directory: backend
         env:
           DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
@@ -56,7 +55,7 @@ jobs:
         working-directory: frontend
 
       - name: Start backend
-        run: node dist/server.js &
+        run: node dist/server.js > /tmp/backend.log 2>&1 &
         working-directory: backend
         env:
           DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
@@ -65,11 +64,15 @@ jobs:
           PORT: 3001
 
       - name: Start frontend preview
-        run: npm run preview -- --port 4173 &
+        run: npm run preview -- --port 4173 --host 0.0.0.0 &
         working-directory: frontend
 
       - name: Wait for services
-        run: npx wait-on http://localhost:3001/api/health http://localhost:4173 --timeout 60000
+        run: |
+          npx wait-on http://localhost:3001/api/health http://localhost:4173 --timeout 60000 || {
+            echo "=== Backend startup log ===" && cat /tmp/backend.log
+            exit 1
+          }
 
       - name: Run Playwright tests
         run: npx playwright test
