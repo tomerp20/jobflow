@@ -1,4 +1,4 @@
-import { useState, useCallback, memo } from 'react';
+import { useState, useCallback, useMemo, memo } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -66,6 +66,23 @@ function Board({
         .filter((c) => c.stageId === stageId)
         .sort((a, b) => a.position - b.position),
     [renderCards]
+  );
+
+  // Stable per-stage display card slices — same reference when the slice is unchanged,
+  // so memo(Column) can bail out when cards for that stage didn't change.
+  const displayCardsByStage = useMemo(() => {
+    const map = new Map<string, Card[]>();
+    for (const stage of stages) {
+      map.set(stage.id, getDisplayCardsByStage(stage.id));
+    }
+    return map;
+  }, [stages, getDisplayCardsByStage]);
+
+  // Stable callback for adding a card — bound at Board level so it doesn't change
+  // per-stage inside .map(), which would break memo(SortableColumn) bailout.
+  const stableAddCard = useCallback(
+    (stageId: string) => onAddCard(stageId),
+    [onAddCard]
   );
 
   const sortedStages = [...stages].sort((a, b) => a.position - b.position);
@@ -188,11 +205,11 @@ function Board({
             <SortableColumn
               key={stage.id}
               stage={stage}
-              cards={getDisplayCardsByStage(stage.id)}
+              cards={displayCardsByStage.get(stage.id) ?? []}
               onCardClick={onCardClick}
-              onAddCard={() => onAddCard(stage.id)}
-              onEditStage={onEditStage || (() => {})}
-              onDeleteStage={onDeleteStage || (() => {})}
+              onAddCard={stableAddCard}
+              onEditStage={onEditStage}
+              onDeleteStage={onDeleteStage}
               onResizeStage={onResizeStage}
             />
           ))}
