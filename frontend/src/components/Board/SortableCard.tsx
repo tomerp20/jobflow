@@ -1,3 +1,4 @@
+import { memo, useCallback } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Card } from '@/types';
@@ -5,10 +6,10 @@ import CardPreview from '@/components/Card/CardPreview';
 
 interface SortableCardProps {
   card: Card;
-  onClick: () => void;
+  onCardClick: (id: string) => void;
 }
 
-export default function SortableCard({ card, onClick }: SortableCardProps) {
+function SortableCard({ card, onCardClick }: SortableCardProps) {
   const {
     attributes,
     listeners,
@@ -23,6 +24,10 @@ export default function SortableCard({ card, onClick }: SortableCardProps) {
     transition,
   };
 
+  const handleClick = useCallback(() => {
+    if (!isDragging) onCardClick(card.id);
+  }, [isDragging, onCardClick, card.id]);
+
   return (
     <div
       ref={setNodeRef}
@@ -30,12 +35,11 @@ export default function SortableCard({ card, onClick }: SortableCardProps) {
       {...attributes}
       {...listeners}
       className={`board-card ${isDragging ? 'board-card-ghost' : ''}`}
-      onClick={(e) => {
-        // Don't fire click when finishing a drag
-        if (!isDragging) onClick();
-      }}
+      onClick={handleClick}
     >
       <CardPreview card={card} />
     </div>
   );
 }
+
+export default memo(SortableCard);

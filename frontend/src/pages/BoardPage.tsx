@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useDeferredValue } from 'react';
 import { stagesApi, cardsApi } from '@/services/api';
 import type { Stage, Card, CardFilters } from '@/types';
 import Board from '@/components/Board/Board';
@@ -10,11 +10,24 @@ import StageForm from '@/components/Board/StageForm';
 import TodoPanel from '@/components/Todo/TodoPanel';
 import { useCardEvents } from '@/hooks/useCardEvents';
 
+type NonSearchFilters = Omit<CardFilters, 'search'>;
+
+function matchesSearch(card: Card, query: string): boolean {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return (
+    (card.companyName?.toLowerCase().includes(q) ?? false) ||
+    (card.roleTitle?.toLowerCase().includes(q) ?? false) ||
+    (card.notes?.toLowerCase().includes(q) ?? false)
+  );
+}
+
 export default function BoardPage() {
   const [stages, setStages] = useState<Stage[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState<CardFilters>({});
+  const [filters, setFilters] = useState<NonSearchFilters>({});
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createStageId, setCreateStageId] = useState<string>('');
@@ -26,6 +39,8 @@ export default function BoardPage() {
 
   useCardEvents({ setCards });
 
+  // Search is now client-side — fetchData no longer depends on the search query.
+  // Only stage/priority/workMode filters still hit the server.
   const fetchData = useCallback(async () => {
     try {
       const [stagesData, cardsData] = await Promise.all([
@@ -45,7 +60,16 @@ export default function BoardPage() {
     fetchData();
   }, [fetchData]);
 
-  const handleMoveCard = async (cardId: string, newStageId: string, newPosition: number) => {
+  // deferredSearch lags behind searchQuery during rapid typing.
+  // filteredCards only recomputes when deferredSearch settles, keeping
+  // the input responsive and protecting the Board tree from mid-typing re-renders.
+  const deferredSearch = useDeferredValue(searchQuery);
+  const filteredCards = useMemo(
+    () => cards.filter((card) => matchesSearch(card, deferredSearch)),
+    [cards, deferredSearch],
+  );
+
+  const handleMoveCard = useCallback(async (cardId: string, newStageId: string, newPosition: number) => {
     setCards((prev) =>
       prev.map((c) =>
         c.id === cardId ? { ...c, stageId: newStageId, position: newPosition } : c
@@ -63,70 +87,66 @@ export default function BoardPage() {
     } catch {
       fetchData();
     }
-  };
+  }, [fetchData]);
 
-  const handleCardCreated = (card: Card) => {
+  const handleCardCreated = useCallback((card: Card) => {
     setCards((prev) => [...prev, card]);
     setShowCreateForm(false);
-  };
+  }, []);
 
-  const handleCardUpdated = (updatedCard: Card) => {
+  const handleCardUpdated = useCallback((updatedCard: Card) => {
     setCards((prev) => prev.map((c) => (c.id === updatedCard.id ? updatedCard : c)));
-  };
+  }, []);
 
-  const handleCardDeleted = (cardId: string) => {
+  const handleCardDeleted = useCallback((cardId: string) => {
     setCards((prev) => prev.filter((c) => c.id !== cardId));
     setSelectedCardId(null);
-  };
+  }, []);
 
-  const handleAddCard = (stageId: string) => {
+  const handleAddCard = useCallback((stageId: string) => {
     setCreateStageId(stageId);
     setShowCreateForm(true);
-  };
+  }, []);
 
   // ── Stage handlers ──────────────────────────────────────────────────────────
 
-  const handleAddStage = () => {
+  const handleAddStage = useCallback(() => {
     setEditingStage(undefined);
     setShowStageForm(true);
-  };
+  }, []);
 
-  const handleEditStage = (stage: Stage) => {
+  const handleEditStage = useCallback((stage: Stage) => {
     setEditingStage(stage);
     setShowStageForm(true);
-  };
+  }, []);
 
-  const handleStageSaved = (saved: Stage) => {
+  const handleStageSaved = useCallback((saved: Stage) => {
     if (editingStage) {
-      // Rename: update in place
       setStages((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
     } else {
-      // New stage: append
       setStages((prev) => [...prev, saved]);
     }
     setShowStageForm(false);
     setEditingStage(undefined);
-  };
+  }, [editingStage]);
 
-  const handleDeleteStage = (stage: Stage) => {
+  const handleDeleteStage = useCallback((stage: Stage) => {
     setDeleteConfirmStage(stage);
-  };
+  }, []);
 
-  const confirmDeleteStage = async () => {
+  const confirmDeleteStage = useCallback(async () => {
     if (!deleteConfirmStage) return;
     try {
       await stagesApi.deleteStage(deleteConfirmStage.id);
-      // Refetch everything since cards were moved
       setDeleteConfirmStage(null);
       fetchData();
     } catch (err: any) {
       console.error('Failed to delete stage:', err);
       alert(err.response?.data?.error?.message || 'Failed to delete stage');
     }
-  };
+  }, [deleteConfirmStage, fetchData]);
 
-  const handleResizeStage = async (stageId: string, width: number) => {
-    // Optimistic update
+  const handleResizeStage = useCallback(async (stageId: string, width: number) => {
     setStages((prev) => prev.map((s) => (s.id === stageId ? { ...s, width } : s)));
     try {
       const updated = await stagesApi.updateStage(stageId, { width });
@@ -134,10 +154,9 @@ export default function BoardPage() {
     } catch {
       fetchData();
     }
-  };
+  }, [fetchData]);
 
-  const handleReorderStages = async (stageIds: string[]) => {
-    // Optimistic update
+  const handleReorderStages = useCallback(async (stageIds: string[]) => {
     const reordered = stageIds.map((id, i) => {
       const stage = stages.find((s) => s.id === id)!;
       return { ...stage, position: i };
@@ -149,7 +168,7 @@ export default function BoardPage() {
     } catch {
       fetchData();
     }
-  };
+  }, [stages, fetchData]);
 
   const roleTitleSuggestions = useMemo(
     () => Array.from(new Set(cards.map((c) => c.roleTitle))).sort(),
@@ -163,7 +182,13 @@ export default function BoardPage() {
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       <ReminderBanner />
-      <SearchBar filters={filters} onFiltersChange={setFilters} stages={stages} />
+      <SearchBar
+        filters={filters}
+        onFiltersChange={setFilters}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        stages={stages}
+      />
       <div className="px-4 mb-4">
         <TodoPanel onTodoMutated={fetchData} />
       </div>
@@ -171,6 +196,7 @@ export default function BoardPage() {
         <Board
           stages={stages}
           cards={cards}
+          displayCards={filteredCards}
           loading={loading}
           onMoveCard={handleMoveCard}
           onCardClick={setSelectedCardId}

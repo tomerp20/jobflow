@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, memo } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -19,7 +19,10 @@ import { Plus } from 'lucide-react';
 
 interface BoardProps {
   stages: Stage[];
+  /** Full card set — used for DnD position calculations. */
   cards: Card[];
+  /** Filtered card set — used only for rendering per column. Defaults to cards when not provided. */
+  displayCards?: Card[];
   loading: boolean;
   onMoveCard: (cardId: string, stageId: string, position: number) => void;
   onCardClick: (cardId: string) => void;
@@ -33,10 +36,11 @@ interface BoardProps {
 
 type DragType = 'card' | 'column' | null;
 
-export default function Board({
-  stages, cards, loading, onMoveCard, onCardClick, onAddCard,
+function Board({
+  stages, cards, displayCards, loading, onMoveCard, onCardClick, onAddCard,
   onEditStage, onDeleteStage, onReorderStages, onResizeStage, onAddStage,
 }: BoardProps) {
+  const renderCards = displayCards ?? cards;
   const [activeCard, setActiveCard] = useState<Card | null>(null);
   const [activeColumn, setActiveColumn] = useState<Stage | null>(null);
   const [dragType, setDragType] = useState<DragType>(null);
@@ -46,12 +50,22 @@ export default function Board({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
+  // Full card set — used for DnD position calculations to avoid position corruption when search filters are active.
   const getCardsByStage = useCallback(
     (stageId: string) =>
       cards
         .filter((c) => c.stageId === stageId)
         .sort((a, b) => a.position - b.position),
     [cards]
+  );
+
+  // Display card set — used for rendering per column (may be a filtered subset).
+  const getDisplayCardsByStage = useCallback(
+    (stageId: string) =>
+      renderCards
+        .filter((c) => c.stageId === stageId)
+        .sort((a, b) => a.position - b.position),
+    [renderCards]
   );
 
   const sortedStages = [...stages].sort((a, b) => a.position - b.position);
@@ -174,7 +188,7 @@ export default function Board({
             <SortableColumn
               key={stage.id}
               stage={stage}
-              cards={getCardsByStage(stage.id)}
+              cards={getDisplayCardsByStage(stage.id)}
               onCardClick={onCardClick}
               onAddCard={() => onAddCard(stage.id)}
               onEditStage={onEditStage || (() => {})}
@@ -219,3 +233,5 @@ export default function Board({
     </DndContext>
   );
 }
+
+export default memo(Board);
