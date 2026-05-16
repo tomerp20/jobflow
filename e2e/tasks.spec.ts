@@ -19,19 +19,38 @@ test('user adds a Task to an Application and the Task count appears on the Board
   await expect(page.locator('h2', { hasText: companyName })).toBeVisible();
 
   // Add a Task via the task input in the detail panel.
-  await page.getByPlaceholder('Add a task for this card...').fill('Send follow-up email');
+  // The Tasks section is near the bottom of a scrollable modal — scroll into view first.
+  const taskInput = page.getByPlaceholder('Add a task for this card...');
+  await taskInput.scrollIntoViewIfNeeded();
+  await taskInput.fill('Send follow-up email');
   await page.getByRole('button', { name: 'Add task' }).click();
 
   // Wait for the task to appear in the panel list before closing.
-  await expect(page.getByTitle('Send follow-up email')).toBeVisible();
+  // Scoped to the modal to avoid false matches from other page content.
+  const modal = page.locator('.modal-backdrop');
+  await expect(modal.getByTitle('Send follow-up email')).toBeVisible();
 
   // Close the detail modal.
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.locator('h2', { hasText: companyName })).not.toBeVisible();
 
-  // The board card must now display a violet active-Task count badge of 1.
+  // The board card must show a violet badge (activeTodoCount > 0).
+  // CardPreview renders totalTodoCount as the badge text; the violet class signals active tasks exist.
   const boardCard = stageColumn.locator('.board-card', { hasText: companyName });
-  await expect(boardCard.locator('.text-violet-500')).toContainText('1', { timeout: 10_000 });
+  const badge = boardCard.locator('.text-violet-500');
+  await expect(badge).toBeVisible({ timeout: 10_000 });
+  await expect(badge).toContainText('1'); // totalTodoCount = 1
+
+  // Reload to confirm the task persisted to the backend.
+  await page.reload();
+  await page.waitForURL('/');
+
+  const boardCardAfterReload = page.locator('.board-column', {
+    has: page.locator('h3', { hasText: stageName }),
+  }).locator('.board-card', { hasText: companyName });
+  await expect(boardCardAfterReload).toBeVisible();
+  await expect(boardCardAfterReload.locator('.text-violet-500')).toBeVisible();
+  await expect(boardCardAfterReload.locator('.text-violet-500')).toContainText('1');
 });
 
 // ---------------------------------------------------------------------------
@@ -52,29 +71,39 @@ test('user completes a Task and the active Task count on the Board drops to 0', 
   await expect(page.locator('h2', { hasText: companyName })).toBeVisible();
 
   // Add a Task.
-  await page.getByPlaceholder('Add a task for this card...').fill('Review offer letter');
+  // The Tasks section is near the bottom of a scrollable modal — scroll into view first.
+  const taskInput = page.getByPlaceholder('Add a task for this card...');
+  await taskInput.scrollIntoViewIfNeeded();
+  await taskInput.fill('Review offer letter');
   await page.getByRole('button', { name: 'Add task' }).click();
-  await expect(page.getByTitle('Review offer letter')).toBeVisible();
+
+  // Scope task visibility check to the modal to avoid ambiguity.
+  const modal = page.locator('.modal-backdrop');
+  await expect(modal.getByTitle('Review offer letter')).toBeVisible();
 
   // Mark the Task as complete via its checkbox.
-  await page.getByRole('checkbox', { name: 'Mark as complete' }).click();
+  // Scoped to the modal to avoid matching other checkboxes on the page.
+  await modal.getByRole('checkbox', { name: 'Mark as complete' }).click();
   // After completion the aria-label flips to "Mark as active" and the checkbox is checked.
-  await expect(page.getByRole('checkbox', { name: 'Mark as active' })).toBeChecked();
+  await expect(modal.getByRole('checkbox', { name: 'Mark as active' })).toBeChecked();
 
   // Close the detail modal.
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.locator('h2', { hasText: companyName })).not.toBeVisible();
 
   // The violet active-Task badge must be gone (activeTodoCount = 0).
+  // totalTodoCount = 1, so the span is still rendered but with text-gray-400, not text-violet-500.
   const boardCard = stageColumn.locator('.board-card', { hasText: companyName });
   await expect(boardCard.locator('.text-violet-500')).not.toBeVisible({ timeout: 10_000 });
 
-  // Reload and confirm the state persists.
+  // Reload and confirm the completed state persists.
   await page.reload();
   await page.waitForURL('/');
 
   const boardCardAfterReload = page.locator('.board-column', {
     has: page.locator('h3', { hasText: stageName }),
   }).locator('.board-card', { hasText: companyName });
+  // Wait for the card to be visible before asserting badge state.
+  await expect(boardCardAfterReload).toBeVisible();
   await expect(boardCardAfterReload.locator('.text-violet-500')).not.toBeVisible();
 });
