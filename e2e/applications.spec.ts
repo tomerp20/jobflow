@@ -54,15 +54,15 @@ test('user edits the role title in an Application and it persists after reload',
   await stageColumn.locator('.board-card', { hasText: companyName }).click();
   await expect(page.locator('h2', { hasText: companyName })).toBeVisible();
 
-  // Edit the Role Title field (label text is "Role Title", no htmlFor — locate via container).
-  const roleTitleInput = page.locator('div:has(> label:has-text("Role Title")) input').first();
-  await roleTitleInput.fill('');
+  // Edit the Role Title field (label text is "Role Title", no htmlFor — traverse to parent, then input).
+  const roleTitleInput = page.locator('label', { hasText: 'Role Title' }).locator('..').locator('input');
   const updatedTitle = 'Senior Engineer E2E';
   await roleTitleInput.fill(updatedTitle);
 
-  // Save and wait for the modal to confirm the save (button re-enables).
+  // Save and wait for the full async round-trip: button enters "Saving..." state, then returns to "Save".
   await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Saving...' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save' })).toBeVisible();
 
   // Close modal.
   await page.getByRole('button', { name: 'Cancel' }).click();
