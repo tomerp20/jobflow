@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Stage, Card } from '@/types';
@@ -13,7 +14,7 @@ interface SortableColumnProps {
   onResizeStage?: (stageId: string, width: number) => void;
 }
 
-export default function SortableColumn({ stage, cards, onCardClick, onAddCard, onEditStage, onDeleteStage, onResizeStage }: SortableColumnProps) {
+function SortableColumn({ stage, cards, onCardClick, onAddCard, onEditStage, onDeleteStage, onResizeStage }: SortableColumnProps) {
   const {
     attributes,
     listeners,
@@ -44,3 +45,5 @@ export default function SortableColumn({ stage, cards, onCardClick, onAddCard, o
     </div>
   );
 }
+
+export default memo(SortableColumn);

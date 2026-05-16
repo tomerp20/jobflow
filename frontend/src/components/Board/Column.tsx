@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import type { Stage, Card } from '@/types';
@@ -16,7 +16,7 @@ interface ColumnProps {
   dragHandleProps?: Record<string, unknown>;
 }
 
-export default function Column({ stage, cards, onCardClick, onAddCard, onEditStage, onDeleteStage, onResizeStage, dragHandleProps }: ColumnProps) {
+function Column({ stage, cards, onCardClick, onAddCard, onEditStage, onDeleteStage, onResizeStage, dragHandleProps }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -53,7 +53,7 @@ export default function Column({ stage, cards, onCardClick, onAddCard, onEditSta
     document.addEventListener('mouseup', handleMouseUp);
   }, [columnWidth, onResizeStage, stage.id, stage.width]);
 
-  const cardIds = cards.map((c) => c.id);
+  const cardIds = useMemo(() => cards.map((c) => c.id), [cards]);
 
   // Close menu on outside click
   useEffect(() => {
@@ -150,3 +150,5 @@ export default function Column({ stage, cards, onCardClick, onAddCard, onEditSta
     </div>
   );
 }
+
+export default memo(Column);
