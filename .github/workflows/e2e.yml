@@ -51,8 +51,12 @@ jobs:
         working-directory: backend
 
       - name: Build frontend
+        # VITE_API_URL is baked into the bundle so the browser calls the
+        # backend directly (cross-origin). preview.proxy is kept as backup.
         run: npm run build
         working-directory: frontend
+        env:
+          VITE_API_URL: http://localhost:3001/api
 
       - name: Start backend
         run: node dist/server.js > /tmp/backend.log 2>&1 &
@@ -62,6 +66,9 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           NODE_ENV: production
           PORT: 3001
+          # Allow the E2E frontend origin (direct cross-origin requests when
+          # the browser calls localhost:3001 directly from localhost:4173)
+          CORS_ORIGIN: http://localhost:4173
 
       - name: Start frontend preview
         run: npm run preview -- --port 4173 --host 0.0.0.0 &
@@ -78,6 +85,10 @@ jobs:
         run: npx playwright test
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:4173
+
+      - name: Dump backend log on failure
+        if: failure()
+        run: cat /tmp/backend.log || echo "(no backend log)"
 
       - name: Upload Playwright report
         if: always()

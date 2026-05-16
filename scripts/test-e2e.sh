@@ -29,13 +29,16 @@ echo "--- Building backend ---"
 npm --prefix "$ROOT/backend" run build
 
 echo "--- Building frontend ---"
-npm --prefix "$ROOT/frontend" run build
+# Bake the backend URL in so the browser calls it directly (no proxy needed).
+VITE_API_URL=http://localhost:3001/api \
+  npm --prefix "$ROOT/frontend" run build
 
 echo "--- Starting backend ---"
 (
   cd "$ROOT/backend"
   DATABASE_URL="$TEST_DATABASE_URL" \
   JWT_SECRET="${JWT_SECRET:-$(openssl rand -hex 32)}" \
+  CORS_ORIGIN="http://localhost:4173" \
   NODE_ENV=production \
   PORT=3001 \
   node dist/server.js
