@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "seed:test": "npm --prefix backend run seed:test",
+    "test:e2e": "bash scripts/test-e2e.sh"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.4",
+    "wait-on": "^8.0.2"
+  }
+}

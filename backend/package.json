@@ -8,10 +8,11 @@
     "build": "tsc && tsc -p tsconfig.migrations.json",
     "start": "node dist/server.js",
     "start:prod": "npm run migrate:prod && node dist/server.js",
-    "migrate": "knex migrate:latest --knexfile knexfile.ts",
+    "migrate": "ts-node ./node_modules/.bin/knex migrate:latest --knexfile knexfile.ts",
     "migrate:prod": "knex migrate:latest --knexfile knexfile.prod.cjs",
     "migrate:rollback": "knex migrate:rollback --knexfile knexfile.ts",
     "seed": "knex seed:run --knexfile knexfile.ts",
+    "seed:test": "ts-node --transpile-only --project tsconfig.seed.json scripts/seed-test.ts",
     "test": "jest --forceExit --detectOpenHandles",
     "test:watch": "jest --watch",
     "lint": "eslint src/"
