@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, memo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import type { Stage, Card } from '@/types';
@@ -9,7 +9,7 @@ interface ColumnProps {
   stage: Stage;
   cards: Card[];
   onCardClick: (cardId: string) => void;
-  onAddCard: () => void;
+  onAddCard: (stageId: string) => void;
   onEditStage?: (stage: Stage) => void;
   onDeleteStage?: (stage: Stage) => void;
   onResizeStage?: (stageId: string, width: number) => void;
@@ -21,48 +21,48 @@ function Column({ stage, cards, onCardClick, onAddCard, onEditStage, onDeleteSta
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [resizeWidth, setResizeWidth] = useState<number | null>(null);
-  const isResizingRef = useRef(false);
-  const startXRef = useRef(0);
-  const startWidthRef = useRef(0);
+  // Latest values used by the on-demand resize listeners. Refs avoid re-attaching listeners on every render.
+  const onResizeStageRef = useRef(onResizeStage);
+  const stageRef = useRef(stage);
+  useEffect(() => { onResizeStageRef.current = onResizeStage; }, [onResizeStage]);
+  useEffect(() => { stageRef.current = stage; }, [stage]);
 
   const columnWidth = resizeWidth ?? stage.width ?? 320;
 
-  const handleResizeMouseDown = (e: React.MouseEvent) => {
+  const handleAddCard = useCallback(() => {
+    onAddCard(stage.id);
+  }, [onAddCard, stage.id]);
+
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    isResizingRef.current = true;
-    startXRef.current = e.clientX;
-    startWidthRef.current = columnWidth;
-  };
+    const startX = e.clientX;
+    const startW = resizeWidth ?? stageRef.current.width ?? 320;
+    let lastWidth = startW;
 
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizingRef.current) return;
-      const delta = e.clientX - startXRef.current;
-      const newWidth = Math.min(800, Math.max(200, startWidthRef.current + delta));
+    const handleMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX;
+      const newWidth = Math.min(800, Math.max(200, startW + delta));
+      lastWidth = newWidth;
       setResizeWidth(newWidth);
     };
 
     const handleMouseUp = () => {
-      if (!isResizingRef.current) return;
-      isResizingRef.current = false;
-      setResizeWidth((finalWidth) => {
-        if (onResizeStage && finalWidth !== null && finalWidth !== (stage.width ?? 320)) {
-          onResizeStage(stage.id, finalWidth);
-        }
-        return null;
-      });
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      setResizeWidth(null);
+      const currentStage = stageRef.current;
+      const onResize = onResizeStageRef.current;
+      if (onResize && lastWidth !== (currentStage.width ?? 320)) {
+        onResize(currentStage.id, lastWidth);
+      }
     };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [onResizeStage, stage.id, stage.width]);
+  }, [resizeWidth]);
 
-  const cardIds = cards.map((c) => c.id);
+  const cardIds = useMemo(() => cards.map((c) => c.id), [cards]);
 
   // Close menu on outside click
   useEffect(() => {
@@ -98,7 +98,7 @@ function Column({ stage, cards, onCardClick, onAddCard, onEditStage, onDeleteSta
         </div>
         <div className="flex items-center gap-0.5">
           <button
-            onClick={onAddCard}
+            onClick={handleAddCard}
             className="rounded-md p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition"
             title="Add card"
           >

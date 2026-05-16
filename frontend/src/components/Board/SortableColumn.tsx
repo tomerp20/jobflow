@@ -7,7 +7,7 @@ interface SortableColumnProps {
   stage: Stage;
   cards: Card[];
   onCardClick: (cardId: string) => void;
-  onAddCard: () => void;
+  onAddCard: (stageId: string) => void;
   onEditStage?: (stage: Stage) => void;
   onDeleteStage?: (stage: Stage) => void;
   onResizeStage?: (stageId: string, width: number) => void;

@@ -61,7 +61,9 @@ function Board({
   }, [cards]);
 
   // Display card set — used for rendering per column (may be a filtered subset).
+  // When no filter is active, renderCards === cards, so reuse cardsByStage instead of building a second identical Map.
   const displayCardsByStage = useMemo(() => {
+    if (renderCards === cards) return cardsByStage;
     const m = new Map<string, Card[]>();
     for (const c of renderCards) {
       if (!m.has(c.stageId)) m.set(c.stageId, []);
@@ -69,7 +71,7 @@ function Board({
     }
     for (const arr of m.values()) arr.sort((a, b) => a.position - b.position);
     return m;
-  }, [renderCards]);
+  }, [renderCards, cards, cardsByStage]);
 
   const sortedStages = useMemo(() => [...stages].sort((a, b) => a.position - b.position), [stages]);
   const columnIds = useMemo(() => sortedStages.map((s) => `column-${s.id}`), [sortedStages]);
@@ -193,7 +195,7 @@ function Board({
               stage={stage}
               cards={displayCardsByStage.get(stage.id) ?? []}
               onCardClick={onCardClick}
-              onAddCard={() => onAddCard(stage.id)}
+              onAddCard={onAddCard}
               onEditStage={onEditStage}
               onDeleteStage={onDeleteStage}
               onResizeStage={onResizeStage}
