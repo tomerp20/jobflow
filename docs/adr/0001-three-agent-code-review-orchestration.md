@@ -11,15 +11,16 @@ The original code review flow used a single `senior-code-reviewer` agent to revi
 
 Replace the single-agent review with a three-agent orchestration:
 
-1. **`code-review-orchestrator`** — always runs; performs security review itself; detects which files changed using a 3-layer strategy (path heuristics → file content → cached project memory); spawns only the relevant domain specialists; coordinates the two-phase execution; handles failure and runs a verification pass after fixes.
+1. **`code-review-orchestrator`** — always runs; performs security review itself; detects which files changed using a 3-layer strategy (path heuristics → file content → cached project memory); spawns only the relevant domain specialists; coordinates the three-phase execution; handles failure and runs a verification pass after fixes.
 
 2. **`react-code-reviewer`** — spawned when frontend files change; runs ESLint as a guardrail before semantic analysis; reviews React-specific failure modes (hooks correctness, concurrent rendering, performance, a11y, forms, TypeScript type safety); flags testing gaps in the React domain.
 
-3. **`backend-code-reviewer`** — spawned when backend files change; reviews Node/Express patterns, database logic, migrations, TypeScript type safety, and testing gaps in the backend domain.
+3. **`backend-code-reviewer`** — spawned when backend files change; reviews Node/Express patterns, database logic, migrations, TypeScript type safety, and testing gaps in the backend domain. **Status: planned — not yet implemented.** Until implemented, the orchestrator reviews backend files directly.
 
-**Two-phase execution:**
+**Three-phase execution:**
 - **Phase 1 (Review, parallel):** All relevant agents run simultaneously, each posting its own findings as a summary comment plus inline line-level PR comments.
-- **Phase 2 (Fix, parallel, after all reviews):** Each domain agent reads the entire PR conversation, applies fixes for all issues in its domain. Fixes are skipped if they risk breaking other features/functionality; tests are run after each fix; a failing test reverts that fix and leaves the original PR comment for human resolution.
+- **Phase 2 (Fix, parallel, after all reviews):** Each domain agent reads the entire PR conversation, applies fixes for all issues in its domain. Fixes are skipped if they risk breaking other features/functionality; tests are run after each fix; a failing test reverts that fix and leaves the original PR comment for human resolution. After all fix commits are pushed, the orchestrator performs a verification pass: it re-fetches the full diff and confirms all Critical and High findings have been addressed. Any regression introduced by a fix is caught here and flagged.
+- **Phase 3 (Final status):** The orchestrator posts a summary table on the PR listing which agents ran, how many issues were found, how many were fixed, and which fixes were skipped for human resolution.
 
 **Project-agnostic design:** All three agents live at `~/.claude/agents/` (global scope) so the methodology is portable across projects. File routing uses path heuristics and content analysis, falling back to cached project memory once the onboarding scan has run.
 
@@ -40,4 +41,5 @@ Replace the single-agent review with a three-agent orchestration:
 - PRs touching both domains produce a longer PR conversation (multiple agent threads) — intentional and desirable for traceability.
 - Ambiguous files (not routable by any heuristic) pause the orchestrator, which asks the human in the chat; the answer is cached in project memory and the question is never asked again for that file/pattern.
 - Failure in one specialist does not block others; the orchestrator degrades gracefully, continues, and reports the failure on the PR.
+- Every reviewed PR receives a machine-generated final status table from the orchestrator (Phase 3), listing agents run, findings count, fix count, and skipped items. This creates a permanent, auditable record of each review on the PR itself.
 - The workflow requires no human intervention except for: ambiguous file routing (once per file, cached), and cases where a fix was skipped due to break risk (left as a PR comment).

@@ -117,13 +117,13 @@ Return the PR URL to the user so they can see it.
 ### Step 5: Run Code Review
 
 **This step is mandatory and must run after Step 4 (PR creation) — no exceptions.**
-Any code review that happened during implementation does NOT count as this step. Even if a review was already done, this step must still run independently after the PR exists.
+Any code review that happened during implementation (e.g. as part of a plan file's internal agent phases) does NOT count as this step. Even if a review was already done, this step must still run independently after the PR exists.
 
-Launch the `code-review-orchestrator` agent with the PR number. The orchestrator runs the full review automatically — no further prompting needed.
+Tell Claude — in natural language — to run the orchestrator with the PR number:
 
-```
-Use the code-review-orchestrator agent for PR #<number>
-```
+> "Run the code-review-orchestrator for PR #<number>"
+
+The orchestrator runs the full review automatically — no further prompting needed.
 
 **What the orchestrator does (fully automatic):**
 
@@ -172,5 +172,5 @@ Only the human can approve and merge the PR. This is a hard rule.
 | 2 | Claude | Implement the change |
 | 3 | Claude | Commit with clear message |
 | 4 | Claude | Push and create PR to main |
-| 5 | `code-review-orchestrator` | Phase 1: parallel review (security + domain specialists) → Phase 2: parallel fixes → verification → final status |
+| 5 | `code-review-orchestrator` | Phase 1: parallel review (security + domain specialists) → Phase 2: parallel fixes + verification → Phase 3: final status table posted to PR |
 | 6 | Human | Review PR and merge when satisfied |
