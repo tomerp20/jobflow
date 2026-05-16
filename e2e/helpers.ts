@@ -40,7 +40,9 @@ export async function createApplication(page: Page, stageName: string): Promise<
   await page.getByPlaceholder('Senior Frontend Engineer').fill(roleTitle);
 
   // Submit the form.
-  await page.getByRole('button', { name: 'Add' }).click();
+  const submitBtn = page.getByRole('button', { name: 'Add', exact: true });
+  await expect(submitBtn).toBeEnabled();
+  await submitBtn.click();
 
   // Modal closes and the new card must be visible in the correct Stage column.
   await expect(page.locator('h2', { hasText: 'New Application' })).not.toBeVisible();
