@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+UI_MODE=false
+HEADED=false
+for arg in "$@"; do
+  case $arg in
+    --ui) UI_MODE=true ;;
+    --headed) HEADED=true ;;
+  esac
+done
+
 # Load .env.test from repo root if it exists
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -f "$ROOT/.env.test" ]; then
@@ -59,4 +68,10 @@ echo "--- Waiting for services ---"
   --timeout 60000
 
 echo "--- Running Playwright ---"
-"$ROOT/node_modules/.bin/playwright" test --config "$ROOT/playwright.config.ts"
+if [ "$UI_MODE" = true ]; then
+  "$ROOT/node_modules/.bin/playwright" test --ui --config "$ROOT/playwright.config.ts"
+elif [ "$HEADED" = true ]; then
+  "$ROOT/node_modules/.bin/playwright" test --headed --config "$ROOT/playwright.config.ts"
+else
+  "$ROOT/node_modules/.bin/playwright" test --config "$ROOT/playwright.config.ts"
+fi
