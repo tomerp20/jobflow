@@ -40,7 +40,7 @@ export async function createApplication(page: Page, stageName: string): Promise<
   await page.getByPlaceholder('Senior Frontend Engineer').fill(roleTitle);
 
   // Submit the form.
-  const submitBtn = page.getByRole('button', { name: 'Add', exact: true });
+  const submitBtn = page.locator('form').getByRole('button', { name: 'Add', exact: true });
   await expect(submitBtn).toBeEnabled();
   await submitBtn.click();
 
