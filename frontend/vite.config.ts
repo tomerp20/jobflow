@@ -18,4 +18,12 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    proxy: {
+      '/api': {
+        target: process.env.API_URL || 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
+  },
 });
