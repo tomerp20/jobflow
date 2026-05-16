@@ -50,45 +50,56 @@ function Board({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Full card set — used for DnD position calculations to avoid position corruption when search filters are active.
-  const getCardsByStage = useCallback(
-    (stageId: string) =>
-      cards
-        .filter((c) => c.stageId === stageId)
-        .sort((a, b) => a.position - b.position),
-    [cards]
-  );
+  // Memoize sorted stages and column ids so they don't re-create on every render.
+  const sortedStages = useMemo(() => stages.slice().sort((a, b) => a.position - b.position), [stages]);
+  const columnIds = useMemo(() => sortedStages.map((s) => `column-${s.id}`), [sortedStages]);
 
-  // Display card set — used for rendering per column (may be a filtered subset).
-  const getDisplayCardsByStage = useCallback(
-    (stageId: string) =>
-      renderCards
-        .filter((c) => c.stageId === stageId)
-        .sort((a, b) => a.position - b.position),
-    [renderCards]
-  );
-
-  // Stable per-stage display card slices — same reference when the slice is unchanged,
-  // so memo(Column) can bail out when cards for that stage didn't change.
-  const displayCardsByStage = useMemo(() => {
+  // Precompute maps of cards per stage for both the full `cards` set (used for
+  // DnD calculations) and the `renderCards` set (used for rendering/filtering).
+  const cardsByStage = useMemo(() => {
     const map = new Map<string, Card[]>();
-    for (const stage of stages) {
-      map.set(stage.id, getDisplayCardsByStage(stage.id));
+    for (const s of sortedStages) {
+      map.set(
+        s.id,
+        cards
+          .filter((c) => c.stageId === s.id)
+          .slice()
+          .sort((a, b) => a.position - b.position)
+      );
     }
     return map;
-  }, [stages, getDisplayCardsByStage]);
+  }, [cards, sortedStages]);
 
-  // Stable callback for adding a card — bound at Board level so it doesn't change
-  // per-stage inside .map(), which would break memo(SortableColumn) bailout.
-  const stableAddCard = useCallback(
-    (stageId: string) => onAddCard(stageId),
-    [onAddCard]
-  );
+  const displayCardsByStage = useMemo(() => {
+    const map = new Map<string, Card[]>();
+    for (const s of sortedStages) {
+      map.set(
+        s.id,
+        renderCards
+          .filter((c) => c.stageId === s.id)
+          .slice()
+          .sort((a, b) => a.position - b.position)
+      );
+    }
+    return map;
+  }, [renderCards, sortedStages]);
 
-  const sortedStages = [...stages].sort((a, b) => a.position - b.position);
-  const columnIds = sortedStages.map((s) => `column-${s.id}`);
+  // Stable callback — SortableColumn takes (stageId: string) => void so a single
+  // shared callback is enough; stage.id is bound inside SortableColumn via useCallback.
+  const stableAddCard = useCallback((stageId: string) => onAddCard(stageId), [onAddCard]);
 
-  const handleDragStart = (event: DragStartEvent) => {
+  // Small helpers that read from the memoized maps — stable across renders
+  // unless their inputs change.
+  const getCardsByStage = useCallback((stageId: string) => cardsByStage.get(stageId) ?? [], [cardsByStage]);
+  const getDisplayCardsByStage = useCallback((stageId: string) => displayCardsByStage.get(stageId) ?? [], [displayCardsByStage]);
+
+  const resetDragState = useCallback(() => {
+    setActiveCard(null);
+    setActiveColumn(null);
+    setDragType(null);
+  }, []);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
     const activeId = event.active.id as string;
 
     if (activeId.startsWith('column-')) {
@@ -105,9 +116,9 @@ function Board({
         setDragType('card');
       }
     }
-  };
+  }, [cards, stages]);
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
 
     if (dragType === 'column' && over && onReorderStages) {
@@ -165,13 +176,7 @@ function Board({
     }
 
     resetDragState();
-  };
-
-  const resetDragState = () => {
-    setActiveCard(null);
-    setActiveColumn(null);
-    setDragType(null);
-  };
+  }, [dragType, sortedStages, cards, stages, getCardsByStage, onReorderStages, onMoveCard, resetDragState]);
 
   if (loading) {
     return (
