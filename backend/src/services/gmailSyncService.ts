@@ -4,6 +4,7 @@ import { gmailService } from './gmailService';
 import { classifyEmail } from './emailClassifier';
 import { cardService } from './cardService';
 import { notificationService } from './notificationService';
+import { applicationReceiptHandler } from './applicationReceiptHandler';
 
 function normalize(str: string): string {
   return str.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -94,8 +95,35 @@ export async function syncUserGmail(userId: string): Promise<SyncSummary> {
       extracted_job_url: classification.type === 'application_receipt' ? classification.jobUrl : null,
     };
 
-    if (classification.type !== 'rejection') {
-      await db('processed_emails').insert({ ...baseLog, action: 'not_rejection' });
+    if (classification.type === 'application_receipt') {
+      try {
+        await applicationReceiptHandler({
+          userId,
+          gmailMessageId: email.messageId,
+          subject: email.subject,
+          sender: email.sender,
+          companyName: classification.companyName ?? null,
+          roleTitle: classification.roleTitle ?? null,
+          jobUrl: classification.jobUrl ?? null,
+          confidence: classification.confidence,
+          emailReceivedAt: email.receivedAt,
+        });
+      } catch (err) {
+        logger.error('applicationReceiptHandler failed', { userId, messageId: email.messageId, error: err });
+        await db('processed_emails')
+          .insert({ ...baseLog, action: 'receipt_handler_error' })
+          .onConflict(['user_id', 'gmail_message_id'])
+          .ignore()
+          .catch(() => {});
+      }
+      continue;
+    }
+
+    if (classification.type === 'other') {
+      await db('processed_emails')
+        .insert({ ...baseLog, action: 'not_actionable' })
+        .onConflict(['user_id', 'gmail_message_id'])
+        .ignore();
       summary.notRejection++;
       continue;
     }
