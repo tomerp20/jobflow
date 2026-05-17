@@ -68,6 +68,8 @@ describe('classifyEmail', () => {
     );
 
     expect(result.type).toBe('rejection');
+    expect(result.companyName).toBe('BigTech Inc');
+    expect(result.confidence).toBe(0.98);
   });
 
   it('classifies an unrelated email as other', async () => {
@@ -121,5 +123,13 @@ describe('classifyEmail', () => {
 
     expect(result.type).toBe('application_receipt');
     expect(result.jobUrl).toBeNull();
+  });
+
+  it('propagates errors from generateObject so the caller can log classifier_error', async () => {
+    mockGenerateObject.mockRejectedValue(new Error('LLM API timeout'));
+
+    await expect(
+      classifyEmail('Subject', 'Body')
+    ).rejects.toThrow('LLM API timeout');
   });
 });

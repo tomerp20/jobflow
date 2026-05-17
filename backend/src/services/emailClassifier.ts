@@ -5,9 +5,12 @@ import { z } from 'zod';
 
 const classificationSchema = z.object({
   type: z.enum(['rejection', 'application_receipt', 'other']),
-  companyName: z.string().nullable(),
-  roleTitle: z.string().nullable(),
-  jobUrl: z.string().nullable(),
+  companyName: z.string().max(200).nullable(),
+  roleTitle: z.string().max(200).nullable(),
+  jobUrl: z.string().url().refine(
+    url => /^https?:\/\//i.test(url),
+    { message: 'jobUrl must use http or https scheme' }
+  ).nullable(),
   confidence: z.number().min(0).max(1),
 });
 
@@ -56,6 +59,7 @@ function sanitizeForPrompt(s: string, maxLen: number): string {
     .replace(/```/g, "'''")       // break out of code fences
     .replace(/---+/g, '–––') // break markdown separators
     .replace(/\n{4,}/g, '\n\n\n') // collapse excessive blank lines
+    .replace(/[<>]/g, '')          // prevent XML delimiter escape (OWASP LLM01)
     .slice(0, maxLen);
 }
 
