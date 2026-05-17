@@ -6,6 +6,16 @@ import { cardService } from './cardService';
 import { notificationService } from './notificationService';
 import { applicationReceiptHandler } from './applicationReceiptHandler';
 
+// Max length of the processed_emails.sender column (varchar(255)). Truncate at the
+// call site so an oversized header never causes a silent insert failure — especially
+// in the receipt_handler_error branch, where the catch handler would otherwise
+// swallow the audit row.
+const SENDER_MAX_LEN = 255;
+
+function truncateSender(sender: string): string {
+  return sender.length > SENDER_MAX_LEN ? sender.slice(0, SENDER_MAX_LEN) : sender;
+}
+
 function normalize(str: string): string {
   return str.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -26,10 +36,11 @@ export interface SyncSummary {
   noMatch: number;
   lowConfidence: number;
   notRejection: number;
+  receipts: number;
 }
 
 export async function syncUserGmail(userId: string): Promise<SyncSummary> {
-  const summary: SyncSummary = { scanned: 0, moved: 0, ambiguous: 0, noMatch: 0, lowConfidence: 0, notRejection: 0 };
+  const summary: SyncSummary = { scanned: 0, moved: 0, ambiguous: 0, noMatch: 0, lowConfidence: 0, notRejection: 0, receipts: 0 };
 
   const gmailToken = await db('gmail_tokens').where({ user_id: userId, is_valid: true }).first();
   if (!gmailToken) return summary;
@@ -87,7 +98,7 @@ export async function syncUserGmail(userId: string): Promise<SyncSummary> {
       user_id: userId,
       gmail_message_id: email.messageId,
       subject: email.subject,
-      sender: email.sender,
+      sender: truncateSender(email.sender),
       received_at: email.receivedAt,
       confidence: classification.confidence,
       extracted_company: classification.companyName,
@@ -108,13 +119,20 @@ export async function syncUserGmail(userId: string): Promise<SyncSummary> {
           confidence: classification.confidence,
           emailReceivedAt: email.receivedAt,
         });
+        summary.receipts++;
       } catch (err) {
         logger.error('applicationReceiptHandler failed', { userId, messageId: email.messageId, error: err });
         await db('processed_emails')
           .insert({ ...baseLog, action: 'receipt_handler_error' })
           .onConflict(['user_id', 'gmail_message_id'])
           .ignore()
-          .catch(() => {});
+          .catch((insertErr) => {
+            logger.error('Failed to record receipt_handler_error in processed_emails', {
+              userId,
+              messageId: email.messageId,
+              error: insertErr,
+            });
+          });
       }
       continue;
     }

@@ -237,6 +237,7 @@ export interface SyncSummary {
   noMatch: number;
   lowConfidence: number;
   notRejection: number;
+  receipts: number;
 }
 
 export const gmailApi = {
