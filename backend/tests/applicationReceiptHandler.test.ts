@@ -7,6 +7,7 @@ function createQueryChain(resolvedValue: unknown = undefined) {
   const methods = [
     'where', 'andWhere', 'select', 'first', 'insert', 'update', 'del',
     'returning', 'max', 'join', 'orderBy', 'limit',
+    'onConflict', 'ignore', 'merge',
   ];
   for (const method of methods) {
     chain[method] = jest.fn().mockReturnValue(chain);

@@ -1,6 +1,14 @@
 import db from '@/config/database';
 import { cardService } from '@/services/cardService';
 import { notificationService } from '@/services/notificationService';
+import { AppError } from '@/middleware/errorHandler';
+
+const MAX_VARCHAR_255 = 255;
+
+function truncate(value: string | null, max = MAX_VARCHAR_255): string | null {
+  if (value === null) return null;
+  return value.length > max ? value.slice(0, max) : value;
+}
 
 export interface ApplicationReceiptInput {
   userId: string;
@@ -35,16 +43,19 @@ export async function applicationReceiptHandler(
     user_id: userId,
     gmail_message_id: gmailMessageId,
     subject,
-    sender,
+    sender: truncate(sender),
     received_at: emailReceivedAt,
     confidence,
-    extracted_company: companyName,
-    extracted_role_title: roleTitle,
+    extracted_company: truncate(companyName),
+    extracted_role_title: truncate(roleTitle),
     extracted_job_url: jobUrl,
   };
 
-  if (confidence < 0.9 || companyName === null) {
-    await db('processed_emails').insert({ ...baseLog, action: 'receipt_low_confidence' });
+  if (!Number.isFinite(confidence) || confidence < 0.9 || companyName === null) {
+    await db('processed_emails')
+      .insert({ ...baseLog, action: 'receipt_low_confidence' })
+      .onConflict(['user_id', 'gmail_message_id'])
+      .ignore();
     await notificationService.create(
       userId,
       'Application email detected',
@@ -66,28 +77,39 @@ export async function applicationReceiptHandler(
     usingFallbackStage = true;
   }
 
-  const existingCards: { company_name: string; role_title: string }[] = await db('cards')
+  if (!stage) {
+    throw new AppError(
+      'No stages configured for user — cannot process application receipt',
+      500,
+      'ERR_NO_STAGES'
+    );
+  }
+
+  const existingCards: { id: string; company_name: string; role_title: string }[] = await db('cards')
     .where({ user_id: userId })
-    .select('company_name', 'role_title');
+    .select('id', 'company_name', 'role_title');
 
   const finalRoleTitle = roleTitle ?? 'Unknown Role';
   const normalizedNewCompany = normalizeText(companyName);
   const normalizedNewRole = normalizeText(finalRoleTitle);
 
-  const isDuplicate = existingCards.some((card) => {
+  const matchedCard = existingCards.find((card) => {
     const existingCompany = normalizeText(card.company_name);
     const existingRole = normalizeText(card.role_title);
     return substringMatch(normalizedNewCompany, existingCompany) &&
            substringMatch(normalizedNewRole, existingRole);
   });
 
-  if (isDuplicate) {
-    await db('processed_emails').insert({ ...baseLog, action: 'receipt_already_tracked' });
+  if (matchedCard) {
+    await db('processed_emails')
+      .insert({ ...baseLog, action: 'receipt_already_tracked', card_id: matchedCard.id })
+      .onConflict(['user_id', 'gmail_message_id'])
+      .ignore();
     await notificationService.create(
       userId,
       'Application already tracked',
-      `Your application to ${companyName} is already in your pipeline.`,
-      { companyName, roleTitle }
+      `Your application to ${truncate(companyName, 120)} is already in your pipeline.`,
+      { companyName, roleTitle, matchedCardId: matchedCard.id }
     );
     return { action: 'already_tracked' };
   }
@@ -101,11 +123,15 @@ export async function applicationReceiptHandler(
     date_applied: emailReceivedAt.toISOString().split('T')[0],
   });
 
-  await db('processed_emails').insert({ ...baseLog, action: 'receipt_created', card_id: card.id });
+  await db('processed_emails')
+    .insert({ ...baseLog, action: 'receipt_created', card_id: card.id })
+    .onConflict(['user_id', 'gmail_message_id'])
+    .ignore();
 
+  const safeCompany = truncate(companyName, 120);
   const notificationBody = usingFallbackStage
-    ? `Application to ${companyName} added — no "Applied" stage found, placed in default stage.`
-    : `Application to ${companyName} added to your pipeline.`;
+    ? `Application to ${safeCompany} added — no "Applied" stage found, placed in default stage.`
+    : `Application to ${safeCompany} added to your pipeline.`;
 
   await notificationService.create(
     userId,
