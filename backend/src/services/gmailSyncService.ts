@@ -90,6 +90,8 @@ export async function syncUserGmail(userId: string): Promise<SyncSummary> {
       received_at: email.receivedAt,
       confidence: classification.confidence,
       extracted_company: classification.companyName,
+      extracted_role_title: classification.type === 'application_receipt' ? classification.roleTitle : null,
+      extracted_job_url: classification.type === 'application_receipt' ? classification.jobUrl : null,
     };
 
     if (classification.type !== 'rejection') {
