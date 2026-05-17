@@ -1,5 +1,6 @@
 import db from '../config/database';
 import { AppError } from '../middleware/errorHandler';
+import { Knex } from 'knex';
 
 export interface CardFilters {
   stage?: string;
@@ -15,6 +16,7 @@ export interface CardData {
   role_title: string;
   application_url?: string;
   careers_url?: string;
+  company_icon_url?: string | null;
   source?: string;
   location?: string;
   work_mode?: string;
@@ -41,9 +43,11 @@ async function logActivity(
   fieldChanged?: string,
   oldValue?: string | null,
   newValue?: string | null,
-  note?: string
+  note?: string,
+  trx?: Knex.Transaction
 ) {
-  await db('card_activities').insert({
+  const conn = trx ?? db;
+  await conn('card_activities').insert({
     card_id: cardId,
     user_id: userId,
     action,
@@ -148,7 +152,7 @@ async function queryClearbit(companyName: string): Promise<{ name: string; domai
   }
 }
 
-async function resolveCompanyIconUrl(
+export async function resolveCompanyIconUrl(
   companyName: string,
   applicationUrl?: string,
   careersUrl?: string
@@ -250,18 +254,24 @@ export const cardService = {
     return { ...card, activities };
   },
 
-  async createCard(userId: string, data: CardData) {
-    // Determine position: place at end of stage if not specified
+  async createCard(userId: string, data: CardData, trx?: Knex.Transaction) {
+    const conn = trx ?? db;
     let position = data.position;
     if (position === undefined) {
-      const maxPos = await db('cards')
+      const maxPos = await conn('cards')
         .where({ user_id: userId, stage_id: data.stage_id })
         .max('position as max')
         .first();
       position = (maxPos?.max ?? -1) + 1;
     }
 
-    const [card] = await db('cards')
+    // Use pre-resolved icon URL when provided (callers inside a transaction must pre-resolve
+    // to avoid holding the DB connection open across an HTTP call)
+    const iconUrl = data.company_icon_url !== undefined
+      ? data.company_icon_url
+      : await resolveCompanyIconUrl(data.company_name, data.application_url, data.careers_url);
+
+    const [card] = await conn('cards')
       .insert({
         user_id: userId,
         stage_id: data.stage_id,
@@ -286,14 +296,13 @@ export const cardService = {
         tech_stack: data.tech_stack || [],
         tags: data.tags || [],
         interest_level: data.interest_level ?? 3,
-        company_icon_url: await resolveCompanyIconUrl(data.company_name, data.application_url, data.careers_url),
+        company_icon_url: iconUrl,
       })
       .returning('*');
 
-    await logActivity(card.id, userId, 'created');
+    await logActivity(card.id, userId, 'created', undefined, undefined, undefined, undefined, trx);
 
-    // Return card with stage name
-    const stage = await db('stages').where({ id: card.stage_id }).first();
+    const stage = await conn('stages').where({ id: card.stage_id }).first();
     return { ...card, stage_name: stage?.name };
   },
 

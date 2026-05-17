@@ -1,5 +1,6 @@
 import db from '../config/database';
 import { AppError } from '../middleware/errorHandler';
+import { Knex } from 'knex';
 
 export interface Notification {
   id: string;
@@ -16,9 +17,11 @@ export const notificationService = {
     userId: string,
     title: string,
     body: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    trx?: Knex.Transaction
   ): Promise<Notification> {
-    const [notification] = await db('notifications')
+    const conn = trx ?? db;
+    const [notification] = await conn('notifications')
       .insert({
         user_id: userId,
         title,

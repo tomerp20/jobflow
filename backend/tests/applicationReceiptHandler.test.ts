@@ -22,6 +22,7 @@ function createQueryChain(resolvedValue: unknown = undefined) {
 jest.mock('../src/config/database', () => {
   const handler = (tableName: string) => mockDb(tableName);
   handler.raw = jest.fn().mockResolvedValue({ rows: [{ '?column?': 1 }] });
+  handler.transaction = jest.fn().mockImplementation(async (callback: (trx: typeof handler) => Promise<unknown>) => callback(handler));
   return { __esModule: true, default: handler };
 });
 
@@ -29,6 +30,7 @@ jest.mock('../src/services/cardService', () => ({
   cardService: {
     createCard: jest.fn().mockResolvedValue({ id: 'card-123', stage_name: 'Applied' }),
   },
+  resolveCompanyIconUrl: jest.fn().mockResolvedValue(null),
 }));
 
 jest.mock('../src/services/notificationService', () => ({
@@ -109,7 +111,7 @@ describe('applicationReceiptHandler', () => {
       role_title: 'Software Engineer',
       source: 'email',
       application_url: 'https://acme.com/jobs/123',
-    }));
+    }), expect.anything());
 
     expect(processedEmailsChain.insert).toHaveBeenCalledWith(expect.objectContaining({
       action: 'receipt_created',
@@ -127,7 +129,7 @@ describe('applicationReceiptHandler', () => {
     expect(result).toEqual({ action: 'created' });
     expect(cardService.createCard).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
       role_title: 'Unknown Role',
-    }));
+    }), expect.anything());
   });
 
   it('company + role match existing Application → no creation, receipt_already_tracked recorded, Notification fired', async () => {
@@ -183,7 +185,7 @@ describe('applicationReceiptHandler', () => {
     expect(result).toEqual({ action: 'created' });
     expect(cardService.createCard).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
       stage_id: DEFAULT_STAGE.id,
-    }));
+    }), expect.anything());
 
     const notifCall = (notificationService.create as jest.Mock).mock.calls[0];
     expect(notifCall[2]).toMatch(/fallback|default stage/i);
@@ -199,5 +201,14 @@ describe('applicationReceiptHandler', () => {
     expect(processedEmailsChain.insert).toHaveBeenCalledWith(expect.objectContaining({
       action: 'receipt_low_confidence',
     }));
+  });
+
+  it('transaction error propagates — no silent partial commit when a step throws', async () => {
+    // Simulate card creation failing mid-transaction.
+    // The transaction callback throws, Knex rolls back, and the error reaches the caller.
+    setupDb({ appliedStage: APPLIED_STAGE, existingCards: [] });
+    (cardService.createCard as jest.Mock).mockRejectedValueOnce(new Error('DB write failed'));
+
+    await expect(applicationReceiptHandler(BASE_INPUT)).rejects.toThrow('DB write failed');
   });
 });
