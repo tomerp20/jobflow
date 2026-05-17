@@ -4,8 +4,13 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { z } from 'zod';
 
 const classificationSchema = z.object({
-  isRejection: z.boolean(),
-  companyName: z.string().nullable(),
+  type: z.enum(['rejection', 'application_receipt', 'other']),
+  companyName: z.string().max(200).nullable(),
+  roleTitle: z.string().max(200).nullable(),
+  jobUrl: z.string().url().refine(
+    url => /^https?:\/\//i.test(url),
+    { message: 'jobUrl must use http or https scheme' }
+  ).nullable(),
   confidence: z.number().min(0).max(1),
 });
 
@@ -54,6 +59,7 @@ function sanitizeForPrompt(s: string, maxLen: number): string {
     .replace(/```/g, "'''")       // break out of code fences
     .replace(/---+/g, '–––') // break markdown separators
     .replace(/\n{4,}/g, '\n\n\n') // collapse excessive blank lines
+    .replace(/[<>]/g, '')          // prevent XML delimiter escape (OWASP LLM01)
     .slice(0, maxLen);
 }
 
@@ -67,9 +73,19 @@ export async function classifyEmail(
   const { object } = await generateObject({
     model: getModel(),
     schema: classificationSchema,
-    prompt: `You are analyzing job application emails. Determine if this email is a rejection from a job application process.
+    prompt: `You are analyzing job application emails. Classify this email and extract structured data.
 
-A rejection email typically says the company decided not to move forward with the candidate, they went with other candidates, or the position has been filled.
+Email types:
+- "rejection": The company has decided not to move forward with the candidate, they went with other candidates, or the position has been filled.
+- "application_receipt": The company is acknowledging receipt of a job application (e.g. "Thank you for applying", "We received your application").
+- "other": The email is unrelated to a job application.
+
+Extract:
+- type: one of "rejection", "application_receipt", or "other"
+- companyName: the company name if mentioned, otherwise null
+- roleTitle: the job title or role being applied for if mentioned, otherwise null
+- jobUrl: any URL linking to the specific job posting if mentioned, otherwise null
+- confidence: your confidence in the classification from 0 to 1
 
 <email>
 <subject>${safeSubject}</subject>
