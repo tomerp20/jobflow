@@ -5,6 +5,43 @@ import { useLocation } from 'react-router-dom';
 import { gmailApi } from '@/services/api';
 import type { GmailStatusData, SyncSummary } from '@/services/api';
 
+function SyncResultPanel({ result }: { result: SyncSummary }) {
+  const pl = (n: number, singular: string, plural: string) => `${n} ${n === 1 ? singular : plural}`;
+  const hasActions = result.receipts > 0 || result.moved > 0 || result.ambiguous > 0 || result.lowConfidence > 0;
+
+  return (
+    <div className="text-sm space-y-1">
+      <p className="font-medium text-gray-800">
+        ✦ Sync complete —{' '}
+        {result.scanned === 0
+          ? 'no new emails'
+          : `${result.scanned} email${result.scanned !== 1 ? 's' : ''} scanned`}
+      </p>
+      {result.scanned > 0 && !hasActions && (
+        <p className="pl-4 text-gray-500">All clear, nothing to action</p>
+      )}
+      {result.receipts > 0 && (
+        <p className="pl-4 text-emerald-700">
+          ✚ {pl(result.receipts, 'new application created', 'new applications created')}
+        </p>
+      )}
+      {result.moved > 0 && (
+        <p className="pl-4 text-gray-500">✕ {result.moved} moved to Rejected</p>
+      )}
+      {result.ambiguous > 0 && (
+        <p className="pl-4 text-amber-700">
+          ⚠ {pl(result.ambiguous, 'email needs your review', 'emails need your review')}
+        </p>
+      )}
+      {result.lowConfidence > 0 && (
+        <p className="pl-4 text-amber-700">
+          ⚠ {pl(result.lowConfidence, 'low confidence match', 'low confidence matches')}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [gmailStatus, setGmailStatus] = useState<GmailStatusData>({ connected: false });
   const [loading, setLoading] = useState(true);
@@ -121,11 +158,7 @@ export default function SettingsPage() {
                     ? formatDistanceToNow(parseISO(gmailStatus.lastSyncAt), { addSuffix: true })
                     : 'Never synced yet'}
                 </div>
-                {syncResult && (
-                  <p className="text-sm text-gray-600">
-                    {syncResult.scanned} emails scanned · {syncResult.moved} card{syncResult.moved !== 1 ? 's' : ''} moved to Rejected
-                  </p>
-                )}
+                {syncResult && <SyncResultPanel result={syncResult} />}
                 {syncError && (
                   <p className="text-sm text-red-600">{syncError}</p>
                 )}
