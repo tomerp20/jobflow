@@ -9,6 +9,7 @@ A modern, Kanban-style job search pipeline manager. Track every application from
 - **Activity Timeline** -- Automatic logging of every change with full field-level history
 - **Dashboard Metrics** -- At-a-glance stats on your job search progress
 - **Search & Filter** -- Find cards by company, role, tags, priority, or work mode
+- **Email Agent** -- Connects to Gmail and automatically acts on hiring emails: moves applications to Rejected when a rejection is detected, and creates new applications when a company confirms receipt of your CV
 - **Authentication** -- Secure signup/login with JWT access and refresh tokens
 - **Responsive UI** -- Works on desktop and mobile
 
@@ -24,6 +25,7 @@ A modern, Kanban-style job search pipeline manager. Track every application from
 | Drag & Drop| @dnd-kit                                        |
 | Testing    | Jest, Supertest                                 |
 | DevOps     | Docker, Docker Compose                          |
+| Email      | Gmail API (OAuth2), Google AI / Anthropic SDK   |
 
 ## Prerequisites
 
@@ -193,6 +195,54 @@ All API routes are prefixed with `/api`.
 | PATCH  | `/api/cards/:id/move`       | Yes  | Move card to stage/position     |
 | DELETE | `/api/cards/:id`            | Yes  | Delete a card                   |
 | POST   | `/api/cards/:id/notes`      | Yes  | Add a note to a card            |
+
+### Gmail / Email Agent
+
+| Method | Endpoint               | Auth | Description                          |
+| ------ | ---------------------- | ---- | ------------------------------------ |
+| GET    | `/api/gmail/status`    | Yes  | Check whether Gmail is connected     |
+| GET    | `/api/gmail/auth`      | Yes  | Start Gmail OAuth2 flow              |
+| GET    | `/api/gmail/callback`  | No   | Handle OAuth2 redirect from Google   |
+| POST   | `/api/gmail/sync`      | Yes  | Trigger a manual inbox scan          |
+| DELETE | `/api/gmail/disconnect`| Yes  | Revoke Gmail access and remove tokens|
+
+---
+
+## Email Agent
+
+The Email Agent connects to your Gmail inbox via OAuth2 and automatically acts on hiring-related emails each time a sync runs (manually or on a schedule).
+
+### How it works
+
+1. **Connect** -- Go to Settings and click "Connect Gmail". You are redirected through Google's OAuth2 consent screen. JobFlow stores your access and refresh tokens; it never stores your email password.
+2. **Sync** -- Click "Sync Now" in Settings, or let the scheduled cron job run automatically. The agent fetches unread emails received since the last sync and classifies each one using an LLM (Google Gemini by default, Anthropic Claude as an alternative).
+3. **Act** -- Based on the classification result, the agent takes one of the following actions:
+
+| Email type | Action |
+|---|---|
+| **Rejection** (confidence ≥ 0.9, matching application found) | Moves the matching Application to your Rejection Stage and creates a Notification |
+| **Rejection** (confidence ≥ 0.9, no match found) | Creates a Notification asking you to check manually |
+| **Rejection** (multiple applications match) | Creates a Notification — too ambiguous to act automatically |
+| **Application Receipt** (confidence ≥ 0.9, no existing application) | Creates a new Application in your Applied Stage (`source: "email"`, `date_applied` set to email received date) and creates a Notification |
+| **Application Receipt** (matching application already exists) | Creates a Notification confirming it is already tracked |
+| **Any type** (confidence < 0.9) | Creates a Notification for manual review — no automatic action |
+| **Other** | Recorded in the audit log, no action taken |
+
+### Deduplication
+
+For rejection matching, the agent compares the company name extracted from the email against your existing Applications using a case-insensitive substring match.
+
+For Application Receipt deduplication, the agent compares both company name and role title — applying the same fuzzy match in both directions. This ensures that two applications at the same company (different roles) are not conflated.
+
+### Audit log
+
+Every processed email is recorded in the `processed_emails` table regardless of outcome. This prevents the same email from being actioned twice across multiple syncs.
+
+### LLM provider
+
+Set the `LLM_PROVIDER` environment variable to `google` (default) or `anthropic` to switch the classification backend.
+
+---
 
 ## Project Structure
 
