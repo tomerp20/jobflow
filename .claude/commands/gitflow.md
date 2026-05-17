@@ -18,11 +18,18 @@ bash .claude/commands/gitflow/scripts/detect.sh
 
 Parse the output lines:
 - `GIT_ROOT=<path>` → where changes live (main repo or a worktree path)
-- `BRANCH=<name>` → current branch at that location
-- `STATUS=<value>` → `changes_here` | `changes_in_worktree` | `clean`
-- Remaining lines → dirty file list (`git status --short` format)
+- `BRANCH=<name>` → current branch at that location (or `DETACHED` in detached-HEAD state)
+- `STATUS=<value>` → one of:
+  - `changes_here` — dirty files in the current repo
+  - `changes_in_worktree` — dirty files in exactly one worktree
+  - `multiple_dirty` — dirty files in more than one location (followed by `DIRTY=<path>` lines)
+  - `clean` — nothing to commit anywhere
+- Remaining lines → dirty file list (`git status --short` format), or `DIRTY=<path>` lines when `multiple_dirty`
 
-If `STATUS=clean`, tell the user "No uncommitted changes found." and stop.
+Handle each status:
+- `clean` → tell the user "No uncommitted changes found." and stop.
+- `multiple_dirty` → show the user the list of dirty locations and ask which one to ship. Re-run `detect.sh` from that location (or pass its path) before continuing. Do not guess.
+- `DETACHED` branch → stop and ask the user how to proceed (likely needs a real branch first).
 
 ---
 
@@ -80,15 +87,31 @@ Never skip a step. Never rearrange. If a script exits non-zero, STOP and report 
 
 ### 4a — Create branch (SKIP if BRANCH_NAME already exists, i.e. BRANCH ≠ main)
 
+Before invoking, verify whether the branch already exists locally:
+
+```bash
+git -C "<GIT_ROOT>" show-ref --verify --quiet "refs/heads/<BRANCH_NAME>" \
+  && echo EXISTS || echo MISSING
+```
+
+- `EXISTS` → skip 4a entirely; we are already on the branch.
+- `MISSING` → run the create-branch script:
+
 ```bash
 bash .claude/commands/gitflow/scripts/create-branch.sh "<BRANCH_NAME>"
 ```
 
+`create-branch.sh` branches directly off `origin/main` without resetting local `main`, refuses reserved names (`main`, `master`, `HEAD`), and enforces the `<type>/<kebab-case>` convention from CLAUDE.md.
+
 ### 4b — Stage files
 
+Quote each file path individually so paths with spaces are passed correctly:
+
 ```bash
-bash .claude/commands/gitflow/scripts/stage.sh -C "<GIT_ROOT>" <FILES_TO_STAGE space-separated>
+bash .claude/commands/gitflow/scripts/stage.sh -C "<GIT_ROOT>" "<file 1>" "<file 2>" "<file N>"
 ```
+
+`stage.sh` refuses `.`, `-A`, `--all`, and a deny-list of sensitive paths (`.env*`, `CLAUDE.md`, `*.pem`, `*.key`, `id_rsa*`, `secrets/`). If you see a deny-list error, drop the offending file from the staged set — never bypass it.
 
 ### 4c — Commit (pipe the body via heredoc)
 

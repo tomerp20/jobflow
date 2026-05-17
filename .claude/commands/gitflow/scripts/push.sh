@@ -16,6 +16,13 @@ done
 
 [ -z "$BRANCH" ] && { echo "ERROR: branch-name required" >&2; exit 1; }
 
+# Defense in depth: never push protected base branches through gitflow.
+case "$BRANCH" in
+  main|master)
+    echo "ERROR: refusing to push protected branch '$BRANCH' from gitflow" >&2
+    exit 1 ;;
+esac
+
 if [ -n "$GIT_ROOT" ]; then
   git -C "$GIT_ROOT" push -u origin "$BRANCH"
 else
