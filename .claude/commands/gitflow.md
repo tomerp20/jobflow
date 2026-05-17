@@ -97,76 +97,54 @@ Proceed? y=run  n=abort  e=edit a value
 
 ---
 
-## Phase 4 — Execute scripts in order (only after `y`)
+## Phase 4 — Delegate execution to git-ops agent (only after `y`)
 
-Never skip a step. Never rearrange. If a script exits non-zero, STOP and report the error.
+**All script execution is handled by the `git-ops` agent (Haiku). Never run the scripts directly in the main session.**
 
-### 4a — Create branch (SKIP if BRANCH_NAME already exists, i.e. BRANCH ≠ main)
+Spawn the `git-ops` agent using the Agent tool with `subagent_type: "git-ops"` and `model: "haiku"`. Pass it the following prompt, with every `<placeholder>` filled in from the values inferred in Phase 2:
 
-Before invoking, verify whether the branch already exists locally:
+---
 
-```bash
-git -C "<GIT_ROOT>" show-ref --verify --quiet "refs/heads/<BRANCH_NAME>" \
-  && echo EXISTS || echo MISSING
 ```
+You are being invoked by the /gitflow skill to execute git operations.
+Follow your "Gitflow Script Execution" section exactly.
 
-- `EXISTS` → skip 4a entirely; we are already on the branch.
-- `MISSING` → run the create-branch script:
+GIT_ROOT: <GIT_ROOT>
+BRANCH_NAME: <BRANCH_NAME>
+CREATE_BRANCH: <true if BRANCH was 'main', false otherwise>
+COMMIT_TYPE: <COMMIT_TYPE>
+COMMIT_SUMMARY: <COMMIT_SUMMARY>
+FILES_TO_STAGE: "<file1>" "<file2>" "<fileN>"
 
-```bash
-bash .claude/commands/gitflow/scripts/create-branch.sh "<BRANCH_NAME>"
-```
-
-`create-branch.sh` branches directly off `origin/main` without resetting local `main`, refuses reserved names (`main`, `master`, `HEAD`), and enforces the `<type>/<kebab-case>` convention from CLAUDE.md.
-
-### 4b — Stage files
-
-Quote each file path individually so paths with spaces are passed correctly:
-
-```bash
-bash .claude/commands/gitflow/scripts/stage.sh -C "<GIT_ROOT>" "<file 1>" "<file 2>" "<file N>"
-```
-
-`stage.sh` refuses `.`, `-A`, `--all`, and a deny-list of sensitive paths (`.env*`, `CLAUDE.md`, `*.pem`, `*.key`, `id_rsa*`, `secrets/`). If you see a deny-list error, drop the offending file from the staged set — never bypass it.
-
-### 4c — Commit (pipe the body via heredoc)
-
-```bash
-bash .claude/commands/gitflow/scripts/commit.sh -C "<GIT_ROOT>" "<CHANGE_TYPE>" "<COMMIT_SUMMARY>" <<'BODY'
+COMMIT_BODY:
 - <bullet 1>
 - <bullet 2>
 - <bullet 3>
-BODY
+
+PR_TITLE: <PR_TITLE>
+
+PR_SUMMARY:
+- <summary bullet 1>
+- <summary bullet 2>
+
+PR_CHANGES:
+- <file1>: <one-line description>
+- <file2>: <one-line description>
+
+PR_TEST_PLAN:
+- [ ] <test step 1>
+- [ ] <test step 2>
+
+Return the PR URL when done.
 ```
 
-### 4d — Push
+---
 
-```bash
-bash .claude/commands/gitflow/scripts/push.sh -C "<GIT_ROOT>" "<BRANCH_NAME>"
-```
-
-### 4e — Create PR (pipe the body via heredoc)
-
-```bash
-bash .claude/commands/gitflow/scripts/create-pr.sh "<BRANCH_NAME>" "<PR_TITLE>" <<'BODY'
-## Summary
-<PR_SUMMARY bullets>
-
-## Changes
-<one-line description per changed file>
-
-## Test plan
-<PR_TEST_PLAN checkboxes>
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-BODY
-```
-
-Capture the URL printed to stdout. Report it to the user.
+Wait for the git-ops agent to return. It will print the PR URL.
 
 ### 4f — Trigger code review (MANDATORY — never skip even if not asked)
 
-Extract the PR number from the URL (`.../pull/<N>` → `N`).
+Extract the PR number from the URL returned by git-ops (`.../pull/<N>` → `N`).
 
 Say: "Running Step 5 — code-review-orchestrator for PR #<N>"
 
