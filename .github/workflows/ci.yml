@@ -28,6 +28,13 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: No path-alias imports
+        run: |
+          if grep -rn "from '@/" src --include="*.ts"; then
+            echo "ERROR: @/ path aliases found in backend source. Use relative imports instead."
+            exit 1
+          fi
+
       - name: Run tests
         run: npx jest --forceExit --detectOpenHandles
 
