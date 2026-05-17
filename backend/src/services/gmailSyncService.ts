@@ -92,7 +92,7 @@ export async function syncUserGmail(userId: string): Promise<SyncSummary> {
       extracted_company: classification.companyName,
     };
 
-    if (!classification.isRejection) {
+    if (classification.type !== 'rejection') {
       await db('processed_emails').insert({ ...baseLog, action: 'not_rejection' });
       summary.notRejection++;
       continue;
