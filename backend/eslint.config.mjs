@@ -13,6 +13,7 @@ export default tseslint.config(
       'knexfile*.cjs',
       'seeds/',
       'scripts/',
+      'tests/',
     ],
   },
   eslint.configs.recommended,

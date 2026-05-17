@@ -15,7 +15,8 @@
     "seed:test": "ts-node --transpile-only --project tsconfig.seed.json scripts/seed-test.ts",
     "test": "jest --forceExit --detectOpenHandles",
     "test:watch": "jest --watch",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
