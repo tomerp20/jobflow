@@ -1,0 +1,146 @@
+# /gitflow — Deterministic Git Workflow
+
+Executes the full JobFlow git workflow: detect → infer → confirm → run scripts → review.
+**You call pre-written scripts with inferred values. You do not write git commands yourself.**
+
+Scripts live at: `.claude/commands/gitflow/scripts/`
+Make them executable on first use: `chmod +x .claude/commands/gitflow/scripts/*.sh`
+
+---
+
+## Phase 1 — Detect git state
+
+Run the detect script and parse its output:
+
+```bash
+bash .claude/commands/gitflow/scripts/detect.sh
+```
+
+Parse the output lines:
+- `GIT_ROOT=<path>` → where changes live (main repo or a worktree path)
+- `BRANCH=<name>` → current branch at that location
+- `STATUS=<value>` → `changes_here` | `changes_in_worktree` | `clean`
+- Remaining lines → dirty file list (`git status --short` format)
+
+If `STATUS=clean`, tell the user "No uncommitted changes found." and stop.
+
+---
+
+## Phase 2 — Infer values from conversation context
+
+Derive these variables from what was just implemented in this conversation.
+Do NOT ask the user for these — infer them:
+
+| Variable | Rule |
+|---|---|
+| `CHANGE_TYPE` | `feat` / `fix` / `refactor` / `style` / `docs` / `test` / `chore` |
+| `BRANCH_NAME` | If `BRANCH` ≠ `main` → use detected `BRANCH`. If `BRANCH` = `main` → derive `<type>/<kebab-3-to-5-words>` |
+| `COMMIT_SUMMARY` | Imperative mood, ≤72 chars, no type prefix (e.g. `eliminate search typing lag`) |
+| `COMMIT_BODY` | 2–4 bullet lines describing what changed and why |
+| `PR_TITLE` | ≤70 chars (e.g. `Fix search typing lag with debounced re-renders`) |
+| `PR_SUMMARY` | 1–3 bullets for the PR `## Summary` section |
+| `PR_TEST_PLAN` | Checkbox list (`- [ ] step`) of manual test scenarios |
+| `FILES_TO_STAGE` | The dirty files from Phase 1 — filter out any secrets, `.env`, or `CLAUDE.md` |
+
+---
+
+## Phase 3 — Dry-run display (STOP and wait for confirmation)
+
+Print this block with all values filled in:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+/gitflow DRY RUN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GIT ROOT:   <GIT_ROOT>
+BRANCH:     <BRANCH_NAME>  [exists / will create from main]
+TYPE:       <CHANGE_TYPE>
+COMMIT:     <CHANGE_TYPE>: <COMMIT_SUMMARY>
+BODY:       - <bullet 1>
+            - <bullet 2>
+FILES:
+  + <file 1>
+  + <file 2>
+PR TITLE:   <PR_TITLE>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Proceed? y=run  n=abort  e=edit a value
+```
+
+**Do not run any write command until the user replies.**
+
+- `y` → proceed to Phase 4
+- `n` → abort, no changes made, tell the user nothing was run
+- `e` → ask which field to change, update it, re-display the dry-run, wait again
+
+---
+
+## Phase 4 — Execute scripts in order (only after `y`)
+
+Never skip a step. Never rearrange. If a script exits non-zero, STOP and report the error.
+
+### 4a — Create branch (SKIP if BRANCH_NAME already exists, i.e. BRANCH ≠ main)
+
+```bash
+bash .claude/commands/gitflow/scripts/create-branch.sh "<BRANCH_NAME>"
+```
+
+### 4b — Stage files
+
+```bash
+bash .claude/commands/gitflow/scripts/stage.sh -C "<GIT_ROOT>" <FILES_TO_STAGE space-separated>
+```
+
+### 4c — Commit (pipe the body via heredoc)
+
+```bash
+bash .claude/commands/gitflow/scripts/commit.sh -C "<GIT_ROOT>" "<CHANGE_TYPE>" "<COMMIT_SUMMARY>" <<'BODY'
+- <bullet 1>
+- <bullet 2>
+- <bullet 3>
+BODY
+```
+
+### 4d — Push
+
+```bash
+bash .claude/commands/gitflow/scripts/push.sh -C "<GIT_ROOT>" "<BRANCH_NAME>"
+```
+
+### 4e — Create PR (pipe the body via heredoc)
+
+```bash
+bash .claude/commands/gitflow/scripts/create-pr.sh "<BRANCH_NAME>" "<PR_TITLE>" <<'BODY'
+## Summary
+<PR_SUMMARY bullets>
+
+## Changes
+<one-line description per changed file>
+
+## Test plan
+<PR_TEST_PLAN checkboxes>
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+BODY
+```
+
+Capture the URL printed to stdout. Report it to the user.
+
+### 4f — Trigger code review (MANDATORY — never skip even if not asked)
+
+Extract the PR number from the URL (`.../pull/<N>` → `N`).
+
+Say: "Running Step 5 — code-review-orchestrator for PR #<N>"
+
+Then spawn the `code-review-orchestrator` agent for that PR number.
+
+---
+
+## Hard rules
+
+- Never commit `CLAUDE.md`, `.env`, secrets, or files unrelated to the feature
+- Never pass `.` or `-A` to `stage.sh` — always list explicit file paths
+- Never use `--no-verify`, `--force`, or amend a pushed commit
+- Never push directly to `main` or `master`
+- Never merge — human only
+- Step 4f always runs after a successful PR creation
+- On any script failure: STOP, show the error output, do not continue
