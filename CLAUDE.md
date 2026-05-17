@@ -33,6 +33,37 @@ git checkout -b <prefix>/<short-kebab-case-description>
 
 ---
 
+## Feature Planning Workflow
+
+Before any code is written, new features follow this planning sequence:
+**grill-with-docs → write-a-prd → prd-to-issues → ship**
+
+Two mandatory checks must happen at specific phases to prevent schema gaps from slipping through to implementation.
+
+---
+
+### Grill phase — "Follow the data" check
+
+When the grill resolves what data the system will extract or compute (from emails, APIs, user input, etc.), ask for every new field:
+
+1. **Where does it live permanently?** (e.g., the `cards` table)
+2. **Where does it live in the audit log?** (e.g., the `processed_emails` table)
+
+If the answer to #2 doesn't match the existing column pattern on that audit table, flag it as a schema gap and resolve it before closing the grill. Do not leave audit log columns to be discovered during code review.
+
+---
+
+### prd-to-issues phase — "Enumerate all table changes" check
+
+Before finalising the slice breakdown, explicitly list every database table the feature touches — not just the primary new tables but all side-effect tables (audit logs, join tables, seeder targets). For each table:
+
+- Are all new columns covered by a migration issue's acceptance criteria?
+- Is any existing table missing a column that the new feature implies?
+
+If a column is used by one issue but its migration is not assigned to any issue, create a dedicated migration slice before the issue that depends on it.
+
+---
+
 ## Development Workflow
 
 Every code change must follow this exact workflow — no exceptions.

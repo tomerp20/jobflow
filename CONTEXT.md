@@ -16,9 +16,17 @@ _Avoid_: Status, Column, State
 A Stage whose `is_rejection_stage` flag is set — the Email Agent routes matching rejection emails to this Stage. The flag is seeded automatically to the Stage named "Rejected" at account setup; there is currently no UI to change it. Only one Rejection Stage per user is expected.
 _Avoid_: Terminal stage, Closed stage
 
+**Applied Stage**:
+A Stage whose `is_applied_stage` flag is set — the Email Agent places auto-created Applications here when it detects an Application Receipt. The flag is seeded automatically to the Stage named "Applied" at account setup; there is currently no UI to change it. Only one Applied Stage per user is expected. Mirrors the Rejection Stage pattern.
+_Avoid_: Submitted stage, In-progress stage
+
 **Email Agent**:
-An automated process that reads the user's inbox and acts on Applications based on detected email patterns. Currently handles rejection emails; designed to handle other hiring-process events in the future.
+An automated process that reads the user's inbox and acts on Applications based on detected email patterns. Currently handles rejection emails and Application Receipts; designed to handle other hiring-process events in the future.
 _Avoid_: Rejection Agent, Email Processor, Inbox Monitor
+
+**Application Receipt**:
+An email sent by a company to acknowledge that they received a job application. When the Email Agent detects one with no matching Application in the system, it auto-creates a new Application. Not to be confused with a rejection — an Application Receipt confirms receipt, not outcome.
+_Avoid_: Application confirmation, Acknowledgement email, Receipt email
 
 **Activity**:
 A row in `card_activities` representing either a system-recorded event (action = `created`, `updated`, or `moved`) or a user-authored Note (action = `note_added`). System Activities are created automatically when an Application is created, a field changes, or the Application moves to a new Stage.
@@ -44,9 +52,11 @@ _Avoid_: Todo (internal/DB term), Checklist item
 
 - A **User** owns a set of **Stages**
 - An **Application** lives in exactly one **Stage** at a time
-- One **Stage** per user is seeded as the **Rejection Stage** (the Email Agent's routing target)
+- One **Stage** per user is seeded as the **Rejection Stage** (the Email Agent's routing target for rejections)
+- One **Stage** per user is seeded as the **Applied Stage** (the Email Agent's placement target for auto-created Applications)
 - An **Application** accumulates **Activities** (system) and **Notes** (user) over its lifetime; both are stored in `card_activities` and displayed together as its **Timeline**
 - The **Email Agent** moves **Applications** into the **Rejection Stage** when a matching email is received
+- The **Email Agent** auto-creates **Applications** in the **Applied Stage** when an Application Receipt is detected and no matching Application exists
 - The **Email Agent** produces **Notifications** to inform the user of every automated action it takes
 - A **Task** may optionally be linked to an **Application**; a **Task** without a link is standalone
 
