@@ -44,6 +44,8 @@ export async function seed(knex: Knex): Promise<void> {
       name: stage.name,
       position: stage.position,
       is_default: true,
+      is_rejection_stage: stage.name === 'Rejected',
+      is_applied_stage: stage.name === 'Applied',
     });
   }
 
