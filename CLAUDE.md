@@ -31,6 +31,8 @@ git checkout -b <prefix>/<short-kebab-case-description>
 
 Every code change must follow this exact workflow — no exceptions.
 
+> **Use `/gitflow` to execute Steps 1, 3, 4, and 5 atomically.** This skill runs the full workflow deterministically via pre-written shell scripts — branch creation, commit, push, PR creation, and code review trigger. Invoke it whenever you hear "run the gitflow", "commit and open a PR", "ship this", "push and create a PR", or any equivalent instruction to execute the workflow after implementation is done.
+
 ---
 
 ### Step 1: Create a Branch

@@ -1,5 +1,7 @@
 # /gitflow — Deterministic Git Workflow
 
+**When to invoke this skill:** Any time the JobFlow CLAUDE.md workflow needs to run Steps 1, 3, 4, or 5 — branch creation, committing, pushing, PR creation, and triggering the code review. This is the single canonical mechanism for all git operations in this project. Trigger phrases include: "run the gitflow", "commit and open a PR", "ship this", "push and create a PR", "follow the workflow", or any instruction to execute the CLAUDE.md development workflow after implementation is done.
+
 Executes the full JobFlow git workflow: detect → infer → confirm → run scripts → review.
 **You call pre-written scripts with inferred values. You do not write git commands yourself.**
 
@@ -38,10 +40,24 @@ Handle each status:
 Derive these variables from what was just implemented in this conversation.
 Do NOT ask the user for these — infer them:
 
+Branch prefixes and commit types are **different** — use the right convention for each (both defined in CLAUDE.md):
+
+| Variable | Convention | Values |
+|---|---|---|
+| `BRANCH_PREFIX` | CLAUDE.md branch rule | `feature/` `fix/` `refactor/` `experiment/` `chore/` `docs/` |
+| `COMMIT_TYPE` | Conventional commits | `feat` `fix` `refactor` `style` `docs` `test` `chore` |
+
+Mapping (most common cases):
+- New feature → branch `feature/`, commit `feat:`
+- Bug fix → branch `fix/`, commit `fix:`
+- Refactor → branch `refactor/`, commit `refactor:`
+- Config/deps → branch `chore/`, commit `chore:`
+- Docs → branch `docs/`, commit `docs:`
+- Experiment → branch `experiment/`, commit `chore:` or `refactor:`
+
 | Variable | Rule |
 |---|---|
-| `CHANGE_TYPE` | `feat` / `fix` / `refactor` / `style` / `docs` / `test` / `chore` |
-| `BRANCH_NAME` | If `BRANCH` ≠ `main` → use detected `BRANCH`. If `BRANCH` = `main` → derive `<type>/<kebab-3-to-5-words>` |
+| `BRANCH_NAME` | If `BRANCH` ≠ `main` → use detected `BRANCH`. If `BRANCH` = `main` → `<BRANCH_PREFIX><kebab-3-to-5-words>` e.g. `feature/drag-and-drop-cards` |
 | `COMMIT_SUMMARY` | Imperative mood, ≤72 chars, no type prefix (e.g. `eliminate search typing lag`) |
 | `COMMIT_BODY` | 2–4 bullet lines describing what changed and why |
 | `PR_TITLE` | ≤70 chars (e.g. `Fix search typing lag with debounced re-renders`) |

@@ -17,9 +17,9 @@ case "$BRANCH" in
 esac
 
 # 2. Enforce JobFlow naming convention (see CLAUDE.md)
-if ! [[ "$BRANCH" =~ ^(feat|fix|refactor|experiment|chore|docs|test|style)/[a-z0-9][a-z0-9-]*$ ]]; then
+if ! [[ "$BRANCH" =~ ^(feature|fix|refactor|experiment|chore|docs)/[a-z0-9][a-z0-9-]*$ ]]; then
   echo "ERROR: branch must match '<type>/<kebab-case>' (got: '$BRANCH')" >&2
-  echo "       valid types: feat, fix, refactor, experiment, chore, docs, test, style" >&2
+  echo "       valid types: feature, fix, refactor, experiment, chore, docs" >&2
   exit 1
 fi
 
