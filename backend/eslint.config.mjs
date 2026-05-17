@@ -33,6 +33,12 @@ export default tseslint.config(
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          regex: '^@/',
+          message: "Use relative imports (e.g. '../config/database'). @/ aliases are not rewritten by tsc and will crash at runtime.",
+        }],
+      }],
     },
   },
 );
