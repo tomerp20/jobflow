@@ -6,8 +6,8 @@ import { z } from 'zod';
 const classificationSchema = z.object({
   type: z.enum(['rejection', 'application_receipt', 'other']),
   companyName: z.string().max(200).nullable(),
-  roleTitle: z.string().max(200).nullable(),
-  jobUrl: z.string().url().refine(
+  roleTitle: z.string().max(255).nullable(),
+  jobUrl: z.string().url().max(2048).refine(
     url => /^https?:\/\//i.test(url),
     { message: 'jobUrl must use http or https scheme' }
   ).nullable(),
