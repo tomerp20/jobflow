@@ -1,7 +1,7 @@
-import db from '@/config/database';
-import { cardService } from '@/services/cardService';
-import { notificationService } from '@/services/notificationService';
-import { AppError } from '@/middleware/errorHandler';
+import db from '../config/database';
+import { cardService } from '../services/cardService';
+import { notificationService } from '../services/notificationService';
+import { AppError } from '../middleware/errorHandler';
 
 const MAX_VARCHAR_255 = 255;
 
