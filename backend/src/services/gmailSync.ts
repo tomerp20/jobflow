@@ -3,7 +3,7 @@ import db from '../config/database';
 import logger from '../config/logger';
 import { gmailService } from './gmailService';
 import { classifyEmail, EmailClassification } from './emailClassifier';
-import { cardService } from './cardService';
+import { cardService, resolveCompanyIconUrl } from './cardService';
 import { AppError } from '../middleware/errorHandler';
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -177,6 +177,30 @@ export async function syncUserGmailWith(
   // ── Process emails — one short transaction per email ─────────────────────
   for (const { email, classification } of classified) {
     try {
+      // For high-confidence application receipts, pre-resolve the icon URL
+      // BEFORE opening the transaction. resolveCompanyIconUrl makes an external
+      // HTTP call (Clearbit, 3s timeout) and we must not hold a DB connection
+      // open across external I/O. The resolved value is threaded into
+      // cardService.createCard which skips its own Clearbit lookup when given
+      // a pre-resolved URL.
+      let preResolvedIconUrl: string | null | undefined = undefined;
+      if (
+        classification?.type === 'application_receipt' &&
+        Number.isFinite(classification.confidence) &&
+        classification.confidence >= CONFIDENCE_THRESHOLD &&
+        classification.companyName !== null
+      ) {
+        try {
+          preResolvedIconUrl = await resolveCompanyIconUrl(
+            classification.companyName,
+            classification.jobUrl ?? undefined,
+          );
+        } catch (err) {
+          logger.warn('Icon URL pre-resolution failed', { userId, messageId: email.messageId, error: err });
+          preResolvedIconUrl = null;
+        }
+      }
+
       await knex.transaction(async (trx) => {
         // Serialises all DB writes for this user across concurrent sync calls.
         // Lock is acquired and released per email — shorter hold than per-batch.
@@ -216,7 +240,7 @@ export async function syncUserGmailWith(
         };
 
         if (classification.type === 'application_receipt') {
-          await processReceipt(trx, userId, email, classification as EmailClassification & { type: 'application_receipt' }, baseLog, summary);
+          await processReceipt(trx, userId, email, classification as EmailClassification & { type: 'application_receipt' }, baseLog, summary, preResolvedIconUrl);
           return;
         }
 
@@ -268,6 +292,7 @@ async function processReceipt(
   classification: EmailClassification & { type: 'application_receipt' },
   baseLog: Record<string, unknown>,
   summary: SyncSummary,
+  preResolvedIconUrl: string | null | undefined,
 ): Promise<void> {
   const { companyName, roleTitle, jobUrl, confidence } = classification;
 
@@ -327,18 +352,23 @@ async function processReceipt(
     return;
   }
 
-  // cardService.createCard uses the global db instance (not trx) and makes an
-  // external Clearbit call. Both are known limitations deferred to a future
-  // Clearbit-extraction refactor. The advisory lock serialises this operation
-  // so concurrent syncs cannot race to create duplicate cards.
-  const card = await cardService.createCard(userId, {
-    stage_id: stage.id,
-    company_name: companyName,
-    role_title: finalRoleTitle,
-    application_url: jobUrl ?? undefined,
-    source: 'email',
-    date_applied: email.receivedAt.toISOString().split('T')[0],
-  });
+  // Threading `trx` makes the card INSERT atomic with the processed_emails
+  // audit row — if anything in this transaction rolls back, the card is gone
+  // too, preventing orphan cards that would self-heal into a misleading
+  // "already tracked" audit row on the next sync.
+  const card = await cardService.createCard(
+    userId,
+    {
+      stage_id: stage.id,
+      company_name: companyName,
+      role_title: finalRoleTitle,
+      application_url: jobUrl ?? undefined,
+      source: 'email',
+      date_applied: email.receivedAt.toISOString().split('T')[0],
+      company_icon_url: preResolvedIconUrl ?? null,
+    },
+    trx,
+  );
 
   await trx('processed_emails')
     .insert({ ...baseLog, action: 'receipt_created' as ProcessedAction, card_id: card.id })
@@ -427,10 +457,11 @@ async function processRejection(
     summary.ambiguous++;
   } else {
     const card = matches[0];
-    // cardService.moveCard uses the global db instance (not trx) and contains
-    // its own internal transaction for position shifting. Same advisory-lock
-    // serialisation applies as for createCard above.
-    await cardService.moveCard(card.id, userId, rejectionStage.id, 0);
+    // Threading `trx` makes the move atomic with the moved_to_rejected audit
+    // row — prevents the card sitting in Rejected with no matching audit row
+    // (which on the next sync would filter the card out and produce a
+    // confusing "no card found" notification).
+    await cardService.moveCard(card.id, userId, rejectionStage.id, 0, trx);
     await trx('processed_emails')
       .insert({ ...baseLog, action: 'moved_to_rejected' as ProcessedAction, card_id: card.id })
       .onConflict(['user_id', 'gmail_message_id']).ignore();

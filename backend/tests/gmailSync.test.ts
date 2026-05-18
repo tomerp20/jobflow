@@ -38,6 +38,7 @@ jest.mock('../src/services/cardService', () => ({
     createCard: jest.fn(),
     moveCard: jest.fn(),
   },
+  resolveCompanyIconUrl: jest.fn().mockResolvedValue(null),
 }));
 
 import { syncUserGmailWith, GmailPort, ClassifierPort, SyncDeps, RawEmail, GmailClient } from '../src/services/gmailSync';
@@ -286,12 +287,16 @@ describe('syncUserGmailWith', () => {
       ));
 
       expect(summary.receiptsCreated).toBe(1);
-      expect(cardService.createCard).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-        company_name: 'Acme Corp',
-        role_title: 'Software Engineer',
-        source: 'email',
-        stage_id: APPLIED_STAGE.id,
-      }));
+      expect(cardService.createCard).toHaveBeenCalledWith(
+        USER_ID,
+        expect.objectContaining({
+          company_name: 'Acme Corp',
+          role_title: 'Software Engineer',
+          source: 'email',
+          stage_id: APPLIED_STAGE.id,
+        }),
+        expect.anything(),
+      );
       expect(insertedProcessedEmails).toEqual(
         expect.arrayContaining([expect.objectContaining({ action: 'receipt_created' })]),
       );
@@ -310,9 +315,11 @@ describe('syncUserGmailWith', () => {
       ));
 
       expect(summary.receiptsCreated).toBe(1);
-      expect(cardService.createCard).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-        stage_id: DEFAULT_STAGE.id,
-      }));
+      expect(cardService.createCard).toHaveBeenCalledWith(
+        USER_ID,
+        expect.objectContaining({ stage_id: DEFAULT_STAGE.id }),
+        expect.anything(),
+      );
       expect(insertedNotifications[0]).toEqual(
         expect.objectContaining({ body: expect.stringMatching(/fallback|default stage/i) }),
       );
@@ -387,9 +394,11 @@ describe('syncUserGmailWith', () => {
         { 'msg-001': makeReceiptClassification({ roleTitle: null }) },
       ));
 
-      expect(cardService.createCard).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-        role_title: 'Unknown Role',
-      }));
+      expect(cardService.createCard).toHaveBeenCalledWith(
+        USER_ID,
+        expect.objectContaining({ role_title: 'Unknown Role' }),
+        expect.anything(),
+      );
     });
   });
 
@@ -406,7 +415,7 @@ describe('syncUserGmailWith', () => {
       ));
 
       expect(summary.rejectionsMoved).toBe(1);
-      expect(cardService.moveCard).toHaveBeenCalledWith('card-acme', USER_ID, REJECTION_STAGE.id, 0);
+      expect(cardService.moveCard).toHaveBeenCalledWith('card-acme', USER_ID, REJECTION_STAGE.id, 0, expect.anything());
       expect(insertedProcessedEmails).toEqual(
         expect.arrayContaining([expect.objectContaining({ action: 'moved_to_rejected' })]),
       );
