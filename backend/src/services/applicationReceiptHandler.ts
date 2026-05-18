@@ -58,11 +58,38 @@ export async function applicationReceiptHandler(
     : null;
 
   return db.transaction(async (trx) => {
+    // Serialise per-user inside this transaction. Without this lock, two concurrent
+    // handlers for the same user can both read the same `cards` set in the dedup
+    // check, both decide no match exists, and both create a duplicate card.
+    // The lock is released automatically when the transaction commits or rolls back.
+    await trx.raw('SELECT pg_advisory_xact_lock(hashtext(?))', [`receipt:${userId}`]);
+
+    // Authoritative idempotency check: if this gmail_message_id has already been
+    // processed (and reached a terminal state) for this user, short-circuit. This
+    // runs inside the transaction *after* the per-user advisory lock so retries
+    // and races cannot get past it and create a duplicate card. We do NOT rely on
+    // the ON CONFLICT DO NOTHING on the inserts below because Postgres silently
+    // skips conflicting rows without aborting the transaction.
+    const existingProcessed = await trx('processed_emails')
+      .where({ user_id: userId, gmail_message_id: gmailMessageId })
+      .select('action')
+      .first();
+
+    if (existingProcessed) {
+      const prior = existingProcessed.action as string;
+      if (prior === 'receipt_low_confidence') return { action: 'low_confidence' };
+      if (prior === 'receipt_already_tracked') return { action: 'already_tracked' };
+      if (prior === 'receipt_created') return { action: 'created' };
+      // Any other recorded action (e.g. receipt_handler_error from gmailSyncService
+      // after a prior crash) means no side-effect-bearing path has completed yet —
+      // fall through and process normally.
+    }
+
     if (!Number.isFinite(confidence) || confidence < 0.9 || companyName === null) {
       await trx('processed_emails')
         .insert({ ...baseLog, action: 'receipt_low_confidence' })
         .onConflict(['user_id', 'gmail_message_id'])
-        .ignore();
+        .merge(['action', 'card_id', 'processed_at', 'confidence']);
       await notificationService.create(
         userId,
         'Application email detected',
@@ -112,7 +139,7 @@ export async function applicationReceiptHandler(
       await trx('processed_emails')
         .insert({ ...baseLog, action: 'receipt_already_tracked', card_id: matchedCard.id })
         .onConflict(['user_id', 'gmail_message_id'])
-        .ignore();
+        .merge(['action', 'card_id', 'processed_at', 'confidence']);
       await notificationService.create(
         userId,
         'Application already tracked',
@@ -136,7 +163,7 @@ export async function applicationReceiptHandler(
     await trx('processed_emails')
       .insert({ ...baseLog, action: 'receipt_created', card_id: card.id })
       .onConflict(['user_id', 'gmail_message_id'])
-      .ignore();
+      .merge(['action', 'card_id', 'processed_at', 'confidence']);
 
     const safeCompany = truncate(companyName, 120);
     const notificationBody = usingFallbackStage

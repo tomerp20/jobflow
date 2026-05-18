@@ -65,7 +65,11 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.id;
-      const card = await cardService.createCard(userId, req.body);
+      // Strip server-controlled fields so a client can't bypass icon resolution
+      // (or any future internally-resolved field) by passing it in the body.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { company_icon_url: _companyIconUrl, ...safeBody } = req.body ?? {};
+      const card = await cardService.createCard(userId, safeBody);
       res.status(201).json({ data: card });
     } catch (err) {
       next(err);

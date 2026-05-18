@@ -36,25 +36,27 @@ export interface CardData {
   position?: number;
 }
 
-async function logActivity(
-  cardId: string,
-  userId: string,
-  action: string,
-  fieldChanged?: string,
-  oldValue?: string | null,
-  newValue?: string | null,
-  note?: string,
-  trx?: Knex.Transaction
-) {
-  const conn = trx ?? db;
+interface LogActivityOptions {
+  cardId: string;
+  userId: string;
+  action: string;
+  fieldChanged?: string;
+  oldValue?: string | null;
+  newValue?: string | null;
+  note?: string;
+  trx?: Knex.Transaction;
+}
+
+async function logActivity(opts: LogActivityOptions) {
+  const conn = opts.trx ?? db;
   await conn('card_activities').insert({
-    card_id: cardId,
-    user_id: userId,
-    action,
-    field_changed: fieldChanged || null,
-    old_value: oldValue || null,
-    new_value: newValue || null,
-    note: note || null,
+    card_id: opts.cardId,
+    user_id: opts.userId,
+    action: opts.action,
+    field_changed: opts.fieldChanged || null,
+    old_value: opts.oldValue || null,
+    new_value: opts.newValue || null,
+    note: opts.note || null,
   });
 }
 
@@ -300,7 +302,7 @@ export const cardService = {
       })
       .returning('*');
 
-    await logActivity(card.id, userId, 'created', undefined, undefined, undefined, undefined, trx);
+    await logActivity({ cardId: card.id, userId, action: 'created', trx });
 
     const stage = await conn('stages').where({ id: card.stage_id }).first();
     return { ...card, stage_name: stage?.name };
@@ -367,7 +369,14 @@ export const cardService = {
 
     // Log each field change as a separate activity
     for (const change of changes) {
-      await logActivity(cardId, userId, 'updated', change.field, change.oldVal, change.newVal);
+      await logActivity({
+        cardId,
+        userId,
+        action: 'updated',
+        fieldChanged: change.field,
+        oldValue: change.oldVal,
+        newValue: change.newVal,
+      });
     }
 
     const stage = await db('stages').where({ id: updated.stage_id }).first();
@@ -423,14 +432,14 @@ export const cardService = {
     // Log move activity
     if (oldStageId !== stageId) {
       const oldStage = await db('stages').where({ id: oldStageId }).first();
-      await logActivity(
+      await logActivity({
         cardId,
         userId,
-        'moved',
-        'stage_id',
-        oldStage?.name || oldStageId,
-        targetStage.name
-      );
+        action: 'moved',
+        fieldChanged: 'stage_id',
+        oldValue: oldStage?.name || oldStageId,
+        newValue: targetStage.name,
+      });
     }
 
     const [updated] = await db('cards')
@@ -469,7 +478,7 @@ export const cardService = {
       throw new AppError('Card not found', 404, 'ERR_NOT_FOUND');
     }
 
-    await logActivity(cardId, userId, 'note_added', undefined, undefined, undefined, note);
+    await logActivity({ cardId, userId, action: 'note_added', note });
 
     // Update last_interaction_date
     await db('cards')

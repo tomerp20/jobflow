@@ -211,4 +211,51 @@ describe('applicationReceiptHandler', () => {
 
     await expect(applicationReceiptHandler(BASE_INPUT)).rejects.toThrow('DB write failed');
   });
+
+  it('already-processed gmail_message_id (created) → short-circuits, does not call createCard or insert', async () => {
+    // Custom setup: processed_emails lookup returns an existing row.
+    const processedEmailsChain = createQueryChain(undefined);
+    // The very first call on processed_emails inside the txn is .where(...).select(...).first()
+    // and must return an existing row to trigger the idempotency short-circuit.
+    processedEmailsChain.first = jest.fn().mockResolvedValueOnce({ action: 'receipt_created', card_id: 'card-old' });
+    const cardsChain = createQueryChain([]);
+    let stagesCallCount = 0;
+
+    mockDb.mockImplementation((tableName: string) => {
+      if (tableName === 'processed_emails') return processedEmailsChain;
+      if (tableName === 'cards') return cardsChain;
+      if (tableName === 'stages') {
+        stagesCallCount++;
+        return createQueryChain(stagesCallCount === 1 ? APPLIED_STAGE : DEFAULT_STAGE);
+      }
+      return createQueryChain(undefined);
+    });
+
+    const result = await applicationReceiptHandler(BASE_INPUT);
+
+    expect(result).toEqual({ action: 'created' });
+    expect(cardService.createCard).not.toHaveBeenCalled();
+    expect(processedEmailsChain.insert).not.toHaveBeenCalled();
+    expect(notificationService.create).not.toHaveBeenCalled();
+  });
+
+  it('already-processed gmail_message_id (low_confidence) → short-circuits, no notification', async () => {
+    const processedEmailsChain = createQueryChain(undefined);
+    processedEmailsChain.first = jest.fn().mockResolvedValueOnce({ action: 'receipt_low_confidence', card_id: null });
+    const cardsChain = createQueryChain([]);
+
+    mockDb.mockImplementation((tableName: string) => {
+      if (tableName === 'processed_emails') return processedEmailsChain;
+      if (tableName === 'cards') return cardsChain;
+      if (tableName === 'stages') return createQueryChain(APPLIED_STAGE);
+      return createQueryChain(undefined);
+    });
+
+    const result = await applicationReceiptHandler({ ...BASE_INPUT, confidence: 0.85 });
+
+    expect(result).toEqual({ action: 'low_confidence' });
+    expect(cardService.createCard).not.toHaveBeenCalled();
+    expect(processedEmailsChain.insert).not.toHaveBeenCalled();
+    expect(notificationService.create).not.toHaveBeenCalled();
+  });
 });
