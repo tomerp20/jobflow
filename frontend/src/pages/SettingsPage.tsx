@@ -8,13 +8,14 @@ import type { GmailStatusData, SyncSummary } from '@/services/api';
 const pl = (n: number, singular: string, plural: string) => `${n} ${n === 1 ? singular : plural}`;
 
 function SyncResultPanel({ result }: { result: SyncSummary }) {
+  // Only count outcomes that have a dedicated render branch below. `noMatch`
+  // and `notActionable` are audit-only — including them here would suppress
+  // the "All clear" line and leave the panel rendering nothing.
   const hasActions =
     result.receiptsCreated > 0 ||
     result.rejectionsMoved > 0 ||
     result.ambiguous > 0 ||
-    result.lowConfidence > 0 ||
-    result.noMatch > 0 ||
-    result.notActionable > 0;
+    result.lowConfidence > 0;
 
   return (
     <div className="text-sm space-y-1" role="status" aria-live="polite">

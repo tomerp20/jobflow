@@ -72,6 +72,28 @@ interface ClassifiedEmail {
   classification: EmailClassification | null;
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Errors from Gaxios/Axios carry a `config` field that includes the request
+// headers — including the Bearer access token. Logging the raw error object
+// can leak that token to whatever transport the logger is configured with.
+// Pick only safe primitive fields before passing to the logger.
+function safeError(err: unknown): Record<string, unknown> {
+  if (err instanceof Error) {
+    const out: Record<string, unknown> = {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+    };
+    const code = (err as { code?: unknown }).code;
+    if (typeof code === 'string' || typeof code === 'number') out.code = code;
+    const status = (err as { status?: unknown }).status;
+    if (typeof status === 'number') out.status = status;
+    return out;
+  }
+  return { message: String(err) };
+}
+
 // ── Canonical match helpers ───────────────────────────────────────────────────
 
 function truncate(value: string | null | undefined, max = MAX_VARCHAR_255): string | null {
@@ -158,7 +180,7 @@ export async function syncUserGmailWith(
       const classification = await deps.classifier.classify(email);
       classified.push({ email, classification });
     } catch (err) {
-      logger.error('Email classification failed', { userId, messageId: email.messageId, error: err });
+      logger.error('Email classification failed', { userId, messageId: email.messageId, error: safeError(err) });
       classified.push({ email, classification: null });
       summary.errors++;
     }
@@ -196,7 +218,7 @@ export async function syncUserGmailWith(
             classification.jobUrl ?? undefined,
           );
         } catch (err) {
-          logger.warn('Icon URL pre-resolution failed', { userId, messageId: email.messageId, error: err });
+          logger.warn('Icon URL pre-resolution failed', { userId, messageId: email.messageId, error: safeError(err) });
           preResolvedIconUrl = null;
         }
       }
@@ -256,7 +278,7 @@ export async function syncUserGmailWith(
         await processRejection(trx, userId, email, classification as EmailClassification & { type: 'rejection' }, baseLog, rejectionStage, userCards, summary);
       });
     } catch (err) {
-      logger.error('gmailSync per-email failure', { userId, messageId: email.messageId, error: err });
+      logger.error('gmailSync per-email failure', { userId, messageId: email.messageId, error: safeError(err) });
       // Best-effort audit row outside the failed transaction — a failed tx cannot
       // write its own audit row, so we write it here with a separate statement.
       try {
@@ -327,9 +349,17 @@ async function processReceipt(
     );
   }
 
+  // Exclude rejection-stage cards so a previously-rejected application does
+  // not block a fresh receipt for the same company+role from creating a new
+  // card. This mirrors the rejection path's scope and lets users re-apply.
+  // We query inside the trx (not the hoisted userCards) so we see cards
+  // created by earlier emails in the same batch — preventing in-batch
+  // duplicate creation.
   const existingCards: { id: string; company_name: string; role_title: string }[] = await trx('cards')
-    .where({ user_id: userId })
-    .select('id', 'company_name', 'role_title');
+    .join('stages', 'cards.stage_id', 'stages.id')
+    .where({ 'cards.user_id': userId })
+    .where('stages.is_rejection_stage', false)
+    .select('cards.id', 'cards.company_name', 'cards.role_title');
 
   const finalRoleTitle = roleTitle ?? 'Unknown Role';
 
@@ -423,7 +453,8 @@ async function processRejection(
     return;
   }
 
-  if (!classification.companyName) {
+  const rejectionCompanyName = classification.companyName;
+  if (!rejectionCompanyName) {
     await trx('processed_emails')
       .insert({ ...baseLog, action: 'no_match' as ProcessedAction })
       .onConflict(['user_id', 'gmail_message_id']).ignore();
@@ -431,7 +462,7 @@ async function processRejection(
     return;
   }
 
-  const matches = cards.filter(c => companyMatch(c.company_name, classification.companyName!));
+  const matches = cards.filter(c => companyMatch(c.company_name, rejectionCompanyName));
 
   if (matches.length === 0) {
     await trx('processed_emails')
@@ -440,8 +471,8 @@ async function processRejection(
     await trx('notifications').insert({
       user_id: userId,
       title: 'Rejection email — no card found',
-      body: `Received a rejection from ${classification.companyName} but no matching card was found`,
-      metadata: { gmailMessageId: email.messageId, extractedCompany: classification.companyName },
+      body: `Received a rejection from ${rejectionCompanyName} but no matching card was found`,
+      metadata: { gmailMessageId: email.messageId, extractedCompany: rejectionCompanyName },
     });
     summary.noMatch++;
   } else if (matches.length > 1) {
@@ -451,8 +482,8 @@ async function processRejection(
     await trx('notifications').insert({
       user_id: userId,
       title: 'Rejection email needs review',
-      body: `Received a rejection from ${classification.companyName} but multiple cards match`,
-      metadata: { gmailMessageId: email.messageId, extractedCompany: classification.companyName },
+      body: `Received a rejection from ${rejectionCompanyName} but multiple cards match`,
+      metadata: { gmailMessageId: email.messageId, extractedCompany: rejectionCompanyName },
     });
     summary.ambiguous++;
   } else {
@@ -485,7 +516,7 @@ function finalize(summary: SyncSummary, startMs: number): SyncSummary {
 
 const realGmailPort: GmailPort = {
   async getValidClient(userId: string) {
-    return gmailService.getValidClient(userId) as Promise<GmailClient | null>;
+    return gmailService.getValidClient(userId);
   },
   async fetchUnreadEmails(client: GmailClient, since: Date | null) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
