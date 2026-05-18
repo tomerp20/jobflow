@@ -1,3 +1,4 @@
+import { Knex } from 'knex';
 import db from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 
@@ -32,6 +33,10 @@ export interface CardData {
   tags?: string[];
   interest_level?: number;
   position?: number;
+  // When present (even as null), callers have pre-resolved the icon URL and
+  // createCard will skip the Clearbit lookup. Used by gmailSync to keep the
+  // external HTTP call outside the per-email transaction.
+  company_icon_url?: string | null;
 }
 
 async function logActivity(
@@ -41,9 +46,10 @@ async function logActivity(
   fieldChanged?: string,
   oldValue?: string | null,
   newValue?: string | null,
-  note?: string
+  note?: string,
+  runner: Knex | Knex.Transaction = db,
 ) {
-  await db('card_activities').insert({
+  await runner('card_activities').insert({
     card_id: cardId,
     user_id: userId,
     action,
@@ -148,7 +154,7 @@ async function queryClearbit(companyName: string): Promise<{ name: string; domai
   }
 }
 
-async function resolveCompanyIconUrl(
+export async function resolveCompanyIconUrl(
   companyName: string,
   applicationUrl?: string,
   careersUrl?: string
@@ -250,18 +256,28 @@ export const cardService = {
     return { ...card, activities };
   },
 
-  async createCard(userId: string, data: CardData) {
+  async createCard(userId: string, data: CardData, trx?: Knex.Transaction) {
+    const runner: Knex | Knex.Transaction = trx ?? db;
+
     // Determine position: place at end of stage if not specified
     let position = data.position;
     if (position === undefined) {
-      const maxPos = await db('cards')
+      const maxPos = await runner('cards')
         .where({ user_id: userId, stage_id: data.stage_id })
         .max('position as max')
         .first();
       position = (maxPos?.max ?? -1) + 1;
     }
 
-    const [card] = await db('cards')
+    // Caller may pre-resolve the icon URL (e.g. gmailSync resolves it outside
+    // its per-email transaction to avoid holding a DB connection across the
+    // Clearbit HTTP call). Detect presence with `in` so an explicit `null` is
+    // respected.
+    const companyIconUrl: string | null = 'company_icon_url' in data
+      ? data.company_icon_url ?? null
+      : await resolveCompanyIconUrl(data.company_name, data.application_url, data.careers_url);
+
+    const [card] = await runner('cards')
       .insert({
         user_id: userId,
         stage_id: data.stage_id,
@@ -286,14 +302,14 @@ export const cardService = {
         tech_stack: data.tech_stack || [],
         tags: data.tags || [],
         interest_level: data.interest_level ?? 3,
-        company_icon_url: await resolveCompanyIconUrl(data.company_name, data.application_url, data.careers_url),
+        company_icon_url: companyIconUrl,
       })
       .returning('*');
 
-    await logActivity(card.id, userId, 'created');
+    await logActivity(card.id, userId, 'created', undefined, undefined, undefined, undefined, runner);
 
     // Return card with stage name
-    const stage = await db('stages').where({ id: card.stage_id }).first();
+    const stage = await runner('stages').where({ id: card.stage_id }).first();
     return { ...card, stage_name: stage?.name };
   },
 
@@ -365,8 +381,10 @@ export const cardService = {
     return { ...updated, stage_name: stage?.name };
   },
 
-  async moveCard(cardId: string, userId: string, stageId: string, position: number) {
-    const card = await db('cards')
+  async moveCard(cardId: string, userId: string, stageId: string, position: number, trx?: Knex.Transaction) {
+    const runner: Knex | Knex.Transaction = trx ?? db;
+
+    const card = await runner('cards')
       .where({ id: cardId, user_id: userId })
       .first();
 
@@ -375,7 +393,7 @@ export const cardService = {
     }
 
     // Verify target stage belongs to user
-    const targetStage = await db('stages')
+    const targetStage = await runner('stages')
       .where({ id: stageId, user_id: userId })
       .first();
 
@@ -386,45 +404,56 @@ export const cardService = {
     const oldStageId = card.stage_id;
     const oldPosition = card.position;
 
-    await db.transaction(async (trx) => {
+    const performMove = async (t: Knex.Transaction) => {
       // Remove from old position: shift cards in old stage down to fill gap
-      await trx('cards')
+      await t('cards')
         .where({ user_id: userId, stage_id: oldStageId })
         .andWhere('position', '>', oldPosition)
         .decrement('position', 1);
 
       // Make room in new position: shift cards in target stage up
-      await trx('cards')
+      await t('cards')
         .where({ user_id: userId, stage_id: stageId })
         .andWhere('position', '>=', position)
         .andWhere('id', '!=', cardId)
         .increment('position', 1);
 
       // Move the card
-      await trx('cards')
+      await t('cards')
         .where({ id: cardId })
         .update({
           stage_id: stageId,
           position,
-          updated_at: trx.fn.now(),
-          ...(oldStageId !== stageId ? { last_interaction_date: trx.fn.now() } : {}),
+          updated_at: t.fn.now(),
+          ...(oldStageId !== stageId ? { last_interaction_date: t.fn.now() } : {}),
         });
-    });
+    };
+
+    if (trx) {
+      // Caller owns the transaction — run inside it so the move atomically
+      // joins whatever the caller is doing (e.g. gmailSync writing the
+      // processed_emails audit row in the same trx).
+      await performMove(trx);
+    } else {
+      await db.transaction(performMove);
+    }
 
     // Log move activity
     if (oldStageId !== stageId) {
-      const oldStage = await db('stages').where({ id: oldStageId }).first();
+      const oldStage = await runner('stages').where({ id: oldStageId }).first();
       await logActivity(
         cardId,
         userId,
         'moved',
         'stage_id',
         oldStage?.name || oldStageId,
-        targetStage.name
+        targetStage.name,
+        undefined,
+        runner,
       );
     }
 
-    const [updated] = await db('cards')
+    const [updated] = await runner('cards')
       .join('stages', 'cards.stage_id', 'stages.id')
       .where({ 'cards.id': cardId })
       .select('cards.*', 'stages.name as stage_name');

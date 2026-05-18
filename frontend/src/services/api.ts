@@ -232,12 +232,16 @@ export type GmailStatusData =
 
 export interface SyncSummary {
   scanned: number;
-  moved: number;
-  ambiguous: number;
-  noMatch: number;
+  receiptsCreated: number;
+  receiptsAlreadyTracked: number;
+  receiptsLowConfidence: number;
+  rejectionsMoved: number;
   lowConfidence: number;
-  notRejection: number;
-  receipts: number;
+  noMatch: number;
+  ambiguous: number;
+  notActionable: number;
+  errors: number;
+  durationMs: number;
 }
 
 export const gmailApi = {
