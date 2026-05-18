@@ -3,7 +3,7 @@ import { timingSafeEqual, createHash } from 'crypto';
 import db from '../config/database';
 import { authenticate } from '../middleware/auth';
 import { gmailService } from '../services/gmailService';
-import { syncUserGmail } from '../services/gmailSyncService';
+import { syncUserGmail } from '../services/gmailSync';
 
 const router = Router();
 

@@ -9,12 +9,12 @@ const pl = (n: number, singular: string, plural: string) => `${n} ${n === 1 ? si
 
 function SyncResultPanel({ result }: { result: SyncSummary }) {
   const hasActions =
-    result.receipts > 0 ||
-    result.moved > 0 ||
+    result.receiptsCreated > 0 ||
+    result.rejectionsMoved > 0 ||
     result.ambiguous > 0 ||
     result.lowConfidence > 0 ||
     result.noMatch > 0 ||
-    result.notRejection > 0;
+    result.notActionable > 0;
 
   return (
     <div className="text-sm space-y-1" role="status" aria-live="polite">
@@ -27,13 +27,13 @@ function SyncResultPanel({ result }: { result: SyncSummary }) {
       {result.scanned > 0 && !hasActions && (
         <p className="pl-4 text-gray-500">All clear, nothing to action</p>
       )}
-      {result.receipts > 0 && (
+      {result.receiptsCreated > 0 && (
         <p className="pl-4 text-emerald-700">
-          ✚ {pl(result.receipts, 'new application created', 'new applications created')}
+          ✚ {pl(result.receiptsCreated, 'new application created', 'new applications created')}
         </p>
       )}
-      {result.moved > 0 && (
-        <p className="pl-4 text-gray-500">✕ {result.moved} moved to Rejected</p>
+      {result.rejectionsMoved > 0 && (
+        <p className="pl-4 text-gray-500">✕ {result.rejectionsMoved} moved to Rejected</p>
       )}
       {result.ambiguous > 0 && (
         <p className="pl-4 text-amber-700">
