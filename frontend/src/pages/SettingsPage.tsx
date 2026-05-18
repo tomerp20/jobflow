@@ -5,12 +5,19 @@ import { useLocation } from 'react-router-dom';
 import { gmailApi } from '@/services/api';
 import type { GmailStatusData, SyncSummary } from '@/services/api';
 
+const pl = (n: number, singular: string, plural: string) => `${n} ${n === 1 ? singular : plural}`;
+
 function SyncResultPanel({ result }: { result: SyncSummary }) {
-  const pl = (n: number, singular: string, plural: string) => `${n} ${n === 1 ? singular : plural}`;
-  const hasActions = result.receipts > 0 || result.moved > 0 || result.ambiguous > 0 || result.lowConfidence > 0;
+  const hasActions =
+    result.receipts > 0 ||
+    result.moved > 0 ||
+    result.ambiguous > 0 ||
+    result.lowConfidence > 0 ||
+    result.noMatch > 0 ||
+    result.notRejection > 0;
 
   return (
-    <div className="text-sm space-y-1">
+    <div className="text-sm space-y-1" role="status" aria-live="polite">
       <p className="font-medium text-gray-800">
         ✦ Sync complete —{' '}
         {result.scanned === 0
