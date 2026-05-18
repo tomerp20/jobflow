@@ -15,6 +15,7 @@
     "seed:test": "ts-node --transpile-only --project tsconfig.seed.json scripts/seed-test.ts",
     "test": "jest --forceExit --detectOpenHandles",
     "test:watch": "jest --watch",
+    "test:integration": "jest --config jest.integration.config.ts --forceExit --detectOpenHandles --runInBand",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix"
   },
