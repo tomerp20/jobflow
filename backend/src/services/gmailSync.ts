@@ -64,7 +64,8 @@ type ProcessedAction =
   | 'no_match'
   | 'ambiguous_match'
   | 'not_actionable'
-  | 'classifier_error';
+  | 'classifier_error'
+  | 'email_handler_error';
 
 interface ClassifiedEmail {
   email: RawEmail;
@@ -173,62 +174,83 @@ export async function syncUserGmailWith(
       .select('cards.*', 'stages.name as stage_name'),
   ]);
 
-  // ── Process under per-user advisory lock + transaction ───────────────────
-  await knex.transaction(async (trx) => {
-    // Serialises all DB writes for this user across concurrent sync calls.
-    await trx.raw('SELECT pg_advisory_xact_lock(hashtext(?))', [`gmail_sync:${userId}`]);
+  // ── Process emails — one short transaction per email ─────────────────────
+  for (const { email, classification } of classified) {
+    try {
+      await knex.transaction(async (trx) => {
+        // Serialises all DB writes for this user across concurrent sync calls.
+        // Lock is acquired and released per email — shorter hold than per-batch.
+        await trx.raw('SELECT pg_advisory_xact_lock(hashtext(?))', [`gmail_sync:${userId}`]);
 
-    for (const { email, classification } of classified) {
-      // In-transaction idempotency re-check handles concurrent races that slipped
-      // past the pre-filter.
-      const alreadyDone = await trx('processed_emails')
-        .where({ user_id: userId, gmail_message_id: email.messageId })
-        .first();
-      if (alreadyDone) continue;
+        // In-transaction idempotency re-check handles concurrent races that slipped
+        // past the pre-filter.
+        const alreadyDone = await trx('processed_emails')
+          .where({ user_id: userId, gmail_message_id: email.messageId })
+          .first();
+        if (alreadyDone) return;
 
-      if (classification === null) {
-        await trx('processed_emails').insert({
+        if (classification === null) {
+          await trx('processed_emails').insert({
+            user_id: userId,
+            gmail_message_id: email.messageId,
+            subject: email.subject,
+            sender: truncate(email.sender),
+            received_at: email.receivedAt,
+            action: 'classifier_error' as ProcessedAction,
+          }).onConflict(['user_id', 'gmail_message_id']).ignore();
+          return;
+        }
+
+        const baseLog = {
           user_id: userId,
           gmail_message_id: email.messageId,
           subject: email.subject,
           sender: truncate(email.sender),
           received_at: email.receivedAt,
-          action: 'classifier_error' as ProcessedAction,
+          confidence: classification.confidence,
+          extracted_company: truncate(classification.companyName),
+          extracted_role_title: classification.type === 'application_receipt'
+            ? truncate(classification.roleTitle) : null,
+          extracted_job_url: classification.type === 'application_receipt'
+            ? classification.jobUrl : null,
+        };
+
+        if (classification.type === 'application_receipt') {
+          await processReceipt(trx, userId, email, classification as EmailClassification & { type: 'application_receipt' }, baseLog, summary);
+          return;
+        }
+
+        if (classification.type === 'other') {
+          await trx('processed_emails')
+            .insert({ ...baseLog, action: 'not_actionable' as ProcessedAction })
+            .onConflict(['user_id', 'gmail_message_id']).ignore();
+          summary.notActionable++;
+          return;
+        }
+
+        // classification.type === 'rejection'
+        await processRejection(trx, userId, email, classification as EmailClassification & { type: 'rejection' }, baseLog, rejectionStage, userCards, summary);
+      });
+    } catch (err) {
+      logger.error('gmailSync per-email failure', { userId, messageId: email.messageId, error: err });
+      // Best-effort audit row outside the failed transaction — a failed tx cannot
+      // write its own audit row, so we write it here with a separate statement.
+      try {
+        await knex('processed_emails').insert({
+          user_id: userId,
+          gmail_message_id: email.messageId,
+          subject: email.subject,
+          sender: truncate(email.sender),
+          received_at: email.receivedAt,
+          action: 'email_handler_error' as ProcessedAction,
         }).onConflict(['user_id', 'gmail_message_id']).ignore();
-        continue;
-      }
-
-      const baseLog = {
-        user_id: userId,
-        gmail_message_id: email.messageId,
-        subject: email.subject,
-        sender: truncate(email.sender),
-        received_at: email.receivedAt,
-        confidence: classification.confidence,
-        extracted_company: truncate(classification.companyName),
-        extracted_role_title: classification.type === 'application_receipt'
-          ? truncate(classification.roleTitle) : null,
-        extracted_job_url: classification.type === 'application_receipt'
-          ? classification.jobUrl : null,
-      };
-
-      if (classification.type === 'application_receipt') {
-        await processReceipt(trx, userId, email, classification as EmailClassification & { type: 'application_receipt' }, baseLog, summary);
-        continue;
-      }
-
-      if (classification.type === 'other') {
-        await trx('processed_emails')
-          .insert({ ...baseLog, action: 'not_actionable' as ProcessedAction })
-          .onConflict(['user_id', 'gmail_message_id']).ignore();
-        summary.notActionable++;
-        continue;
-      }
-
-      // classification.type === 'rejection'
-      await processRejection(trx, userId, email, classification as EmailClassification & { type: 'rejection' }, baseLog, rejectionStage, userCards, summary);
+      } catch { /* swallow — audit write is best-effort */ }
+      summary.errors++;
     }
+  }
 
+  // ── Update last_sync_at — own short transaction, outside the email loop ──
+  await knex.transaction(async (trx) => {
     await trx('gmail_tokens')
       .where({ user_id: userId })
       .update({ last_sync_at: trx.fn.now(), updated_at: trx.fn.now() });

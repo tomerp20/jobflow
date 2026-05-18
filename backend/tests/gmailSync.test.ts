@@ -581,6 +581,60 @@ describe('syncUserGmailWith', () => {
     });
   });
 
+  describe('per-email transaction isolation', () => {
+    it('records email_handler_error for the failing email and continues processing the next', async () => {
+      setupDb({ existingCards: [] });
+      (cardService.createCard as jest.Mock).mockResolvedValue({ id: 'card-new' });
+
+      // First transaction call (email 1) throws; subsequent calls succeed normally.
+      const normalImpl = mockTransaction.getMockImplementation()!;
+      let transactionCallCount = 0;
+      mockTransaction.mockImplementation(async (cb: (trx: unknown) => Promise<void>) => {
+        transactionCallCount++;
+        if (transactionCallCount === 1) {
+          throw new Error('simulated ERR_NO_STAGES failure');
+        }
+        return normalImpl(cb);
+      });
+
+      const failEmail: RawEmail = { ...BASE_EMAIL, messageId: 'msg-fail' };
+      const okEmail: RawEmail = { ...BASE_EMAIL, messageId: 'msg-ok' };
+
+      const summary = await syncUserGmailWith(USER_ID, makeDeps(
+        [failEmail, okEmail],
+        {
+          'msg-fail': makeReceiptClassification(),
+          'msg-ok': makeReceiptClassification(),
+        },
+      ));
+
+      expect(summary.errors).toBe(1);
+      expect(summary.receiptsCreated).toBe(1);
+    });
+
+    it('does not rethrow — syncUserGmailWith resolves even when every email fails', async () => {
+      setupDb({ existingCards: [] });
+
+      // Per-email transaction (call 1) throws; last_sync_at transaction (call 2) uses normal mock.
+      const normalImpl = mockTransaction.getMockImplementation()!;
+      let transactionCallCount = 0;
+      mockTransaction.mockImplementation(async (cb: (trx: unknown) => Promise<void>) => {
+        transactionCallCount++;
+        if (transactionCallCount === 1) {
+          throw new Error('all failing');
+        }
+        return normalImpl(cb);
+      });
+
+      const summary = await syncUserGmailWith(USER_ID, makeDeps(
+        [BASE_EMAIL],
+        { 'msg-001': makeReceiptClassification() },
+      ));
+
+      expect(summary.errors).toBe(1);
+    });
+  });
+
   describe('SyncSummary shape', () => {
     it('includes durationMs in the result', async () => {
       setupDb({ gmailToken: null });
