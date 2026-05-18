@@ -9,6 +9,10 @@ const config: Config = {
     '**/*.test.ts',
     '**/*.spec.ts',
   ],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '<rootDir>/tests/integration/',
+  ],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
