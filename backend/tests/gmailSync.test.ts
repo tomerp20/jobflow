@@ -222,7 +222,7 @@ function setupDb(options: SetupOptions = {}) {
     (trx as any).raw = jest.fn().mockResolvedValue(undefined);
     (trx as any).fn = { now: jest.fn().mockReturnValue('2026-01-01T00:00:00.000Z') };
 
-    await cb(trx);
+    return await cb(trx);
   });
 
   mockRaw.mockResolvedValue(undefined);
@@ -399,6 +399,62 @@ describe('syncUserGmailWith', () => {
         expect.objectContaining({ role_title: 'Unknown Role' }),
         expect.anything(),
       );
+    });
+
+    it('marks the second receipt as already_tracked when the first created a matching card in the same batch', async () => {
+      // In-batch dedup: with the hoisted userCardsForReceipt list, the second
+      // email must see the card created by the first email's committed trx
+      // and mark itself as already_tracked rather than creating a duplicate.
+      const { insertedProcessedEmails } = setupDb({ existingCards: [] });
+      (cardService.createCard as jest.Mock).mockResolvedValueOnce({ id: 'card-batch-1', stage_name: 'Applied' });
+
+      const email1: RawEmail = { ...BASE_EMAIL, messageId: 'msg-batch-1' };
+      const email2: RawEmail = { ...BASE_EMAIL, messageId: 'msg-batch-2' };
+
+      const summary = await syncUserGmailWith(USER_ID, makeDeps(
+        [email1, email2],
+        {
+          'msg-batch-1': makeReceiptClassification(),
+          'msg-batch-2': makeReceiptClassification(),
+        },
+      ));
+
+      expect(summary.receiptsCreated).toBe(1);
+      expect(summary.receiptsAlreadyTracked).toBe(1);
+      expect(cardService.createCard).toHaveBeenCalledTimes(1);
+      expect(insertedProcessedEmails).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ action: 'receipt_created' }),
+          expect.objectContaining({ action: 'receipt_already_tracked', card_id: 'card-batch-1' }),
+        ]),
+      );
+    });
+
+    it('does not leave a stale entry in userCardsForReceipt when the trx rolls back', async () => {
+      // Rollback safety: if email 1's trx throws after createCard (or anywhere
+      // inside the callback), the in-memory list must NOT be updated. Email 2
+      // for the same company+role must still create a new card, not match a
+      // ghost entry from the rolled-back trx.
+      setupDb({ existingCards: [] });
+      (cardService.createCard as jest.Mock)
+        .mockRejectedValueOnce(new Error('simulated post-createCard failure'))
+        .mockResolvedValueOnce({ id: 'card-second', stage_name: 'Applied' });
+
+      const email1: RawEmail = { ...BASE_EMAIL, messageId: 'msg-rollback-1' };
+      const email2: RawEmail = { ...BASE_EMAIL, messageId: 'msg-rollback-2' };
+
+      const summary = await syncUserGmailWith(USER_ID, makeDeps(
+        [email1, email2],
+        {
+          'msg-rollback-1': makeReceiptClassification(),
+          'msg-rollback-2': makeReceiptClassification(),
+        },
+      ));
+
+      expect(summary.errors).toBe(1);
+      expect(summary.receiptsCreated).toBe(1);
+      expect(summary.receiptsAlreadyTracked).toBe(0);
+      expect(cardService.createCard).toHaveBeenCalledTimes(2);
     });
   });
 
