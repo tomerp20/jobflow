@@ -1,5 +1,6 @@
 import db from '../config/database';
 import { AppError } from '../middleware/errorHandler';
+import { shiftDown, withTransaction } from '../util/positions';
 
 export interface Todo {
   id: string;
@@ -75,13 +76,12 @@ export const todoService = {
     if (!existing) {
       throw new AppError('Todo not found', 404, 'ERR_NOT_FOUND');
     }
-    await db('todo_items').where({ id, user_id: userId }).del();
-    if (existing.position !== null) {
-      await db('todo_items')
-        .where({ user_id: userId })
-        .andWhere('position', '>', existing.position)
-        .decrement('position', 1);
-    }
+    await withTransaction(db, undefined, async (trx) => {
+      await trx('todo_items').where({ id, user_id: userId }).del();
+      if (existing.position !== null) {
+        await shiftDown({ trx, table: 'todo_items', scope: { user_id: userId }, fromPos: existing.position });
+      }
+    });
   },
 
   async reorderTodos(userId: string, orderedIds: string[]): Promise<Todo[]> {
@@ -100,7 +100,7 @@ export const todoService = {
     // the already-computed priority of the item directly above it.
     const inferredPriority = new Map<string, Todo['priority']>();
 
-    await db.transaction(async (trx) => {
+    await withTransaction(db, undefined, async (trx) => {
       for (let i = 0; i < orderedIds.length; i++) {
         const id = orderedIds[i];
         let priority: Todo['priority'];
