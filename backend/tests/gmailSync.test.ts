@@ -41,7 +41,7 @@ jest.mock('../src/services/cardService', () => ({
   resolveCompanyIconUrl: jest.fn().mockResolvedValue(null),
 }));
 
-import { syncUserGmailWith, GmailPort, ClassifierPort, SyncDeps, RawEmail, GmailClient } from '../src/services/gmailSync';
+import { syncUserGmailWith, normalize, companyMatch, GmailPort, ClassifierPort, SyncDeps, RawEmail, GmailClient } from '../src/services/gmailSync';
 import { cardService } from '../src/services/cardService';
 import { EmailClassification } from '../src/services/emailClassifier';
 
@@ -248,6 +248,60 @@ function makeDeps(emails: RawEmail[], classMap: Record<string, EmailClassificati
 
 afterEach(() => {
   jest.clearAllMocks();
+});
+
+// ── Unit tests for normalize / companyMatch helpers ───────────────────────────
+
+describe('normalize', () => {
+  it('strips spaces and punctuation from ASCII names', () => {
+    expect(normalize('Acme, Inc.')).toBe('acmeinc');
+  });
+
+  it('preserves Hebrew letters', () => {
+    expect(normalize('בנק הפועלים')).toBe('בנקהפועלים');
+  });
+
+  it('preserves mixed Hebrew and Latin letters', () => {
+    expect(normalize('Apple בנק')).toBe('appleבנק');
+  });
+
+  it('preserves accented Latin letters', () => {
+    expect(normalize('Société Générale')).toBe('sociétégénérale');
+  });
+
+  it('strips emoji, preserving surrounding letters', () => {
+    expect(normalize('Company 🚀')).toBe('company');
+  });
+
+  it('returns empty string for a space-only input', () => {
+    expect(normalize('   ')).toBe('');
+  });
+});
+
+describe('companyMatch', () => {
+  it('matches identical Hebrew company names', () => {
+    expect(companyMatch('בנק הפועלים', 'בנק הפועלים')).toBe(true);
+  });
+
+  it('does not cross-match Hebrew and Latin names for the same company', () => {
+    expect(companyMatch('Bank Hapoalim', 'בנק הפועלים')).toBe(false);
+  });
+
+  it('matches when extracted name is a substring of card name (ASCII)', () => {
+    expect(companyMatch('Acme Corporation', 'Acme Corp')).toBe(true);
+  });
+
+  it('rejects when both names normalize to empty', () => {
+    expect(companyMatch('   ', '   ')).toBe(false);
+  });
+
+  it('rejects when extracted name normalizes to ≤3 chars', () => {
+    expect(companyMatch('IBM', 'IBM')).toBe(false);
+  });
+
+  it('matches accented-Latin company names', () => {
+    expect(companyMatch('Société Générale', 'Société Générale')).toBe(true);
+  });
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -609,20 +663,21 @@ describe('syncUserGmailWith', () => {
   });
 
   describe('normalizer parity', () => {
-    it('matches Hebrew-only company name as no-match (not a false positive)', async () => {
+    it('moves card to rejection stage when company name is Hebrew-only', async () => {
       const { insertedProcessedEmails } = setupDb({
         existingCards: [{ id: 'card-1', company_name: 'חברה ישראלית', role_title: 'Engineer' }],
       });
+      (cardService.moveCard as jest.Mock).mockResolvedValue({});
 
       const summary = await syncUserGmailWith(USER_ID, makeDeps(
         [REJECTION_EMAIL],
         { 'msg-002': makeRejectionClassification({ companyName: 'חברה ישראלית' }) },
       ));
 
-      // Both normalize to '' — companyMatch returns false (extracted is too short after normalize)
-      expect(summary.noMatch).toBe(1);
+      // Hebrew letters are preserved — both normalize to 'חברהישראלית', companyMatch returns true
+      expect(summary.rejectionsMoved).toBe(1);
       expect(insertedProcessedEmails).toEqual(
-        expect.arrayContaining([expect.objectContaining({ action: 'no_match' })]),
+        expect.arrayContaining([expect.objectContaining({ action: 'moved_to_rejected' })]),
       );
     });
 

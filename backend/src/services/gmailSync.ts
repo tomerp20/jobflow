@@ -103,16 +103,16 @@ function truncate(value: string | null | undefined, max = MAX_VARCHAR_255): stri
   return value.length > max ? value.slice(0, max) : value;
 }
 
-// Strips all non-ASCII-alphanumeric chars and lowercases. Returns empty string
-// for names that consist entirely of non-ASCII characters (e.g. Hebrew-only).
-function normalize(str: string): string {
-  return str.toLowerCase().replace(/[^a-z0-9]/g, '');
+// Strips non-letter/non-digit characters (Unicode-aware) and lowercases.
+// The `u` flag enables \p{L} (any letter) and \p{N} (any digit) Unicode property escapes.
+export function normalize(str: string): string {
+  return str.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 // Canonical company match — used for both receipt and rejection paths.
-// Rejects if the card company has no ASCII alphanumeric content, or the
-// extracted name is too short (≤3 chars) to be meaningful.
-function companyMatch(cardCompany: string, extractedCompany: string): boolean {
+// Rejects if either normalized name is empty, or the extracted name is too
+// short (≤3 chars) to avoid noise matches.
+export function companyMatch(cardCompany: string, extractedCompany: string): boolean {
   const a = normalize(cardCompany);
   const b = normalize(extractedCompany);
   if (a.length === 0 || b.length <= 3) return false;
