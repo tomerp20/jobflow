@@ -442,6 +442,59 @@ describe('CardService - moveCard', () => {
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 
+  it('should move card within the same stage (no activity logged)', async () => {
+    // Card moves from position 0 to position 3 within STAGE_ID — same column.
+    const cardAtPos0 = { ...MOCK_CARD, position: 0 };
+    const movedCard = { ...MOCK_CARD, position: 3, stage_name: MOCK_STAGE.name };
+    let cardsCallCount = 0;
+
+    // Use the proxy transaction so shiftDown/shiftUp run against mockDb.
+    // The beforeEach proxy is already in place; no override needed here.
+
+    mockDb.mockImplementation((tableName: string) => {
+      if (tableName === 'cards') {
+        cardsCallCount++;
+        if (cardsCallCount === 1) {
+          const chain = createQueryChain(undefined);
+          chain.where = jest.fn().mockReturnValue({
+            first: jest.fn().mockResolvedValue(cardAtPos0),
+          });
+          return chain;
+        }
+        // subsequent trx calls + final select
+        const chain = createQueryChain(undefined);
+        chain.where = jest.fn().mockReturnValue(chain);
+        chain.andWhere = jest.fn().mockReturnValue(chain);
+        chain.decrement = jest.fn().mockResolvedValue(1);
+        chain.increment = jest.fn().mockResolvedValue(1);
+        chain.update = jest.fn().mockResolvedValue(1);
+        chain.join = jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            select: jest.fn().mockResolvedValue([movedCard]),
+          }),
+        });
+        return chain;
+      }
+      if (tableName === 'stages') {
+        const chain = createQueryChain(undefined);
+        chain.where = jest.fn().mockReturnValue({
+          first: jest.fn().mockResolvedValue(MOCK_STAGE),
+        });
+        return chain;
+      }
+      return createQueryChain(undefined);
+    });
+
+    const result = await cardService.moveCard(CARD_ID, USER_ID, STAGE_ID, 3);
+
+    expect(result).toMatchObject({ position: 3 });
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    // No activity logged — same stage, no stage_id change
+    const activityCalls = (mockDb as jest.Mock).mock.calls
+      .filter((args: string[]) => args[0] === 'card_activities');
+    expect(activityCalls).toHaveLength(0);
+  });
+
   it('should throw 404 when moving a non-existent card', async () => {
     const cardsChain = createQueryChain(undefined);
     cardsChain.where = jest.fn().mockReturnValue({

@@ -406,8 +406,24 @@ export const cardService = {
     const oldPosition = card.position;
 
     const performMove = async (t: Knex.Transaction) => {
-      await shiftDown({ trx: t, table: 'cards', scope: { user_id: userId, stage_id: oldStageId }, fromPos: oldPosition });
-      await shiftUp({ trx: t, table: 'cards', scope: { user_id: userId, stage_id: stageId }, fromPos: position });
+      if (oldStageId === stageId && oldPosition !== position) {
+        // Same column: only the cards strictly between old and new position need to
+        // shift — not every card below the departure point or above the destination.
+        const scope = { user_id: userId, stage_id: stageId };
+        if (oldPosition < position) {
+          // Moving down: cards in (oldPosition, position] shift down by 1
+          await shiftDown({ trx: t, table: 'cards', scope, fromPos: oldPosition, toPos: position });
+        } else {
+          // Moving up: cards in [position, oldPosition) shift up by 1
+          await shiftUp({ trx: t, table: 'cards', scope, fromPos: position, toPos: oldPosition - 1 });
+        }
+      } else if (oldStageId !== stageId) {
+        // Cross-column: full tail shift in each column — unavoidable
+        await shiftDown({ trx: t, table: 'cards', scope: { user_id: userId, stage_id: oldStageId }, fromPos: oldPosition });
+        await shiftUp({ trx: t, table: 'cards', scope: { user_id: userId, stage_id: stageId }, fromPos: position });
+      }
+      // oldPosition === position and same stage: no shift needed at all
+
       await t('cards')
         .where({ id: cardId })
         .update({
