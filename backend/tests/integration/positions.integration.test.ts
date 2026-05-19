@@ -114,68 +114,76 @@ describe('shiftUp', () => {
   });
 
   it('respects toPos upper bound', async () => {
+    // Use todo_items (no UNIQUE position constraint) — shiftUp with toPos leaves
+    // duplicate positions in the committed state, which stages would reject.
     const db = getDb();
-    await insertStage(0);
-    await insertStage(1);
-    await insertStage(2);
-    await insertStage(3);
+    await insertTodo(0);
+    await insertTodo(1);
+    await insertTodo(2);
+    await insertTodo(3);
 
     await db.transaction(async (trx) => {
-      await shiftUp({ trx, table: 'stages', scope: { user_id: userId }, fromPos: 1, toPos: 2 });
+      await shiftUp({ trx, table: 'todo_items', scope: { user_id: userId }, fromPos: 1, toPos: 2 });
     });
 
     // positions 1 and 2 shift up; 0 and 3 stay
-    expect(await stagePositions()).toEqual([0, 2, 3, 3]);
+    expect(await todoPositions()).toEqual([0, 2, 3, 3]);
   });
 });
 
 // ── shiftDown ─────────────────────────────────────────────────────────────────
 
 describe('shiftDown', () => {
+  // All shiftDown boundary tests use todo_items (no UNIQUE position constraint).
+  // shiftDown produces duplicate positions in the committed state (e.g. [0,1,1])
+  // because it is designed to be paired with a preceding row deletion; in isolation
+  // the "gap" that deletion would create doesn't exist yet. stages would reject such
+  // states at COMMIT via UNIQUE(user_id, position) DEFERRABLE INITIALLY DEFERRED.
+
   it('uses strict > so the row at fromPos is not shifted', async () => {
     const db = getDb();
-    await insertStage(0);
-    await insertStage(1);
-    await insertStage(2);
+    await insertTodo(0);
+    const todoAtFromPos = await insertTodo(1);
+    await insertTodo(2);
 
     await db.transaction(async (trx) => {
-      await shiftDown({ trx, table: 'stages', scope: { user_id: userId }, fromPos: 1 });
+      await shiftDown({ trx, table: 'todo_items', scope: { user_id: userId }, fromPos: 1 });
     });
 
-    expect(await stagePositions()).toEqual([0, 1, 1]);
-    // row originally at position 1 is NOT shifted (strict >)
-    const rows = await db('stages').where({ user_id: userId }).orderBy('position');
-    expect(rows[1].position).toBe(1); // still 1
+    expect(await todoPositions()).toEqual([0, 1, 1]);
+    // the todo at fromPos=1 is NOT shifted (strict >)
+    const unchanged = await db('todo_items').where({ id: todoAtFromPos }).first();
+    expect(unchanged.position).toBe(1);
   });
 
   it('leaves rows in other scopes untouched', async () => {
     const db = getDb();
-    await insertStage(0);
-    await insertStage(1);
-    await insertStage(0, otherUserId);
-    await insertStage(1, otherUserId);
+    await insertTodo(0);
+    await insertTodo(1);
+    await insertTodo(0, otherUserId);
+    await insertTodo(1, otherUserId);
 
     await db.transaction(async (trx) => {
-      await shiftDown({ trx, table: 'stages', scope: { user_id: userId }, fromPos: 0 });
+      await shiftDown({ trx, table: 'todo_items', scope: { user_id: userId }, fromPos: 0 });
     });
 
-    expect(await stagePositions()).toEqual([0, 0]);
-    expect(await stagePositions(otherUserId)).toEqual([0, 1]); // untouched
+    expect(await todoPositions()).toEqual([0, 0]);
+    expect(await todoPositions(otherUserId)).toEqual([0, 1]); // untouched
   });
 
   it('respects toPos upper bound', async () => {
     const db = getDb();
-    await insertStage(0);
-    await insertStage(1);
-    await insertStage(2);
-    await insertStage(3);
+    await insertTodo(0);
+    await insertTodo(1);
+    await insertTodo(2);
+    await insertTodo(3);
 
     await db.transaction(async (trx) => {
-      await shiftDown({ trx, table: 'stages', scope: { user_id: userId }, fromPos: 0, toPos: 2 });
+      await shiftDown({ trx, table: 'todo_items', scope: { user_id: userId }, fromPos: 0, toPos: 2 });
     });
 
     // positions 1 and 2 shift down (0 is not >0, 3 is above toPos)
-    expect(await stagePositions()).toEqual([0, 0, 1, 3]);
+    expect(await todoPositions()).toEqual([0, 0, 1, 3]);
   });
 });
 
