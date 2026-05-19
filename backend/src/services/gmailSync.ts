@@ -430,7 +430,10 @@ async function processReceipt(
   });
 
   summary.receiptsCreated++;
-  return { newCard: { id: card.id, company_name: companyName, role_title: finalRoleTitle } };
+  // Use the persisted row values rather than the extracted strings so the
+  // in-memory list stays the row-of-record even if createCard ever normalises
+  // names on write.
+  return { newCard: { id: card.id, company_name: card.company_name, role_title: card.role_title } };
 }
 
 // ── Rejection path ────────────────────────────────────────────────────────────

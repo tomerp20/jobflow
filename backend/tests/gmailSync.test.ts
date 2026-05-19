@@ -406,7 +406,12 @@ describe('syncUserGmailWith', () => {
       // email must see the card created by the first email's committed trx
       // and mark itself as already_tracked rather than creating a duplicate.
       const { insertedProcessedEmails } = setupDb({ existingCards: [] });
-      (cardService.createCard as jest.Mock).mockResolvedValueOnce({ id: 'card-batch-1', stage_name: 'Applied' });
+      (cardService.createCard as jest.Mock).mockResolvedValueOnce({
+        id: 'card-batch-1',
+        company_name: 'Acme Corp',
+        role_title: 'Software Engineer',
+        stage_name: 'Applied',
+      });
 
       const email1: RawEmail = { ...BASE_EMAIL, messageId: 'msg-batch-1' };
       const email2: RawEmail = { ...BASE_EMAIL, messageId: 'msg-batch-2' };
@@ -438,7 +443,12 @@ describe('syncUserGmailWith', () => {
       setupDb({ existingCards: [] });
       (cardService.createCard as jest.Mock)
         .mockRejectedValueOnce(new Error('simulated post-createCard failure'))
-        .mockResolvedValueOnce({ id: 'card-second', stage_name: 'Applied' });
+        .mockResolvedValueOnce({
+          id: 'card-second',
+          company_name: 'Acme Corp',
+          role_title: 'Software Engineer',
+          stage_name: 'Applied',
+        });
 
       const email1: RawEmail = { ...BASE_EMAIL, messageId: 'msg-rollback-1' };
       const email2: RawEmail = { ...BASE_EMAIL, messageId: 'msg-rollback-2' };
