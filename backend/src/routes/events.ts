@@ -1,10 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import db from '../config/database';
 import logger from '../config/logger';
 import { pgSubscriber } from '../services/pgSubscriber';
 import { JwtPayload } from '../middleware/auth';
 import { env } from '../config/env';
+import { AppError } from '../middleware/errorHandler';
 
 const router = Router();
 
@@ -19,11 +19,11 @@ const router = Router();
  * access logs and browser history. Ensure any access-log middleware (e.g.
  * morgan) is configured to redact the `token` query param on this route.
  */
-router.get('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/', (req: Request, res: Response, next: NextFunction): void => {
   const token = req.query.token as string;
 
   if (!token) {
-    res.status(401).json({ error: 'Missing token' });
+    next(new AppError('Missing token', 401, 'ERR_MISSING_TOKEN'));
     return;
   }
 
@@ -31,29 +31,16 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
   try {
     decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
   } catch {
-    res.status(401).json({ error: 'Invalid token' });
+    next(new AppError('Invalid token', 401, 'ERR_INVALID_TOKEN'));
     return;
   }
 
-  // Verify the user still exists in the database — wrapped in try/catch so DB
-  // errors are forwarded to the Express error handler before SSE headers are set
-  let userId: string;
-  try {
-    const user = await db('users')
-      .select('id')
-      .where({ id: decoded.userId })
-      .first();
-
-    if (!user) {
-      res.status(401).json({ error: 'Invalid token' });
-      return;
-    }
-
-    userId = user.id as string;
-  } catch (err) {
-    next(err);
+  if (typeof decoded.userId !== 'string' || decoded.userId.length === 0) {
+    next(new AppError('Invalid token', 401, 'ERR_INVALID_TOKEN'));
     return;
   }
+
+  const userId: string = decoded.userId;
 
   // Disable compression for this response — the compression middleware buffers
   // writes into a gzip stream, preventing heartbeats from reaching the proxy.
