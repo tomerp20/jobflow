@@ -54,6 +54,7 @@ export interface SyncSummary {
 
 const MAX_VARCHAR_255 = 255;
 const CONFIDENCE_THRESHOLD = 0.9;
+const CLASSIFY_CONCURRENCY = Number(process.env.GMAIL_CLASSIFY_CONCURRENCY ?? 5);
 
 type ProcessedAction =
   | 'receipt_created'
@@ -75,6 +76,24 @@ interface ClassifiedEmail {
 type TrxResult = { newCard: { id: string; company_name: string; role_title: string } } | null;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 // Errors from Gaxios/Axios carry a `config` field that includes the request
 // headers — including the Bearer access token. Logging the raw error object
@@ -175,18 +194,25 @@ export async function syncUserGmailWith(
   const unprocessed = emails.filter(e => !processedSet.has(e.messageId));
 
   // ── Classify all unprocessed emails (external I/O — outside transaction) ─
-  const classified: ClassifiedEmail[] = [];
-  for (const email of unprocessed) {
-    summary.scanned++;
-    try {
-      const classification = await deps.classifier.classify(email);
-      classified.push({ email, classification });
-    } catch (err) {
-      logger.error('Email classification failed', { userId, messageId: email.messageId, error: safeError(err) });
-      classified.push({ email, classification: null });
-      summary.errors++;
-    }
-  }
+  const classified = await mapWithConcurrency<RawEmail, ClassifiedEmail>(
+    unprocessed,
+    CLASSIFY_CONCURRENCY,
+    async (email) => {
+      try {
+        const classification = await deps.classifier.classify(email);
+        return { email, classification };
+      } catch (err) {
+        logger.error('Email classification failed', {
+          userId,
+          messageId: email.messageId,
+          error: safeError(err),
+        });
+        return { email, classification: null };
+      }
+    },
+  );
+  summary.scanned = classified.length;
+  summary.errors = classified.filter(c => c.classification === null).length;
 
   // ── Hoist read-only lookups before the transaction ───────────────────────
   const [rejectionStage, userCards] = await Promise.all([

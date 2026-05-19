@@ -720,4 +720,66 @@ describe('syncUserGmailWith', () => {
       expect(summary.durationMs).toBeGreaterThanOrEqual(0);
     });
   });
+
+  describe('bounded-concurrency classification', () => {
+    it('classifies 20 emails concurrently — finishes in under 2 s with 200 ms per-email delay', async () => {
+      setupDb({ existingCards: [] });
+
+      const emails: RawEmail[] = Array.from({ length: 20 }, (_, i) => ({
+        messageId: `msg-perf-${i}`,
+        subject: `Email ${i}`,
+        sender: `sender-${i}@example.com`,
+        body: `Body ${i}`,
+        receivedAt: new Date('2024-01-15T10:00:00Z'),
+      }));
+
+      const slowClassifier: ClassifierPort = {
+        async classify(_email: RawEmail): Promise<EmailClassification> {
+          await new Promise(resolve => setTimeout(resolve, 200));
+          return { type: 'other', companyName: null, roleTitle: null, jobUrl: null, confidence: 0.9 };
+        },
+      };
+
+      const start = Date.now();
+      const summary = await syncUserGmailWith(USER_ID, {
+        gmail: fakeGmail(emails),
+        classifier: slowClassifier,
+        db: makeMockKnex(),
+      });
+      const elapsed = Date.now() - start;
+
+      expect(summary.scanned).toBe(20);
+      expect(elapsed).toBeLessThan(2000);
+    }, 10_000);
+
+    it('error isolation — classifier throwing on every 3rd email still yields a fully-populated classified array', async () => {
+      setupDb({ existingCards: [] });
+
+      const emails: RawEmail[] = Array.from({ length: 9 }, (_, i) => ({
+        messageId: `msg-err-${i}`,
+        subject: `Email ${i}`,
+        sender: `sender-${i}@example.com`,
+        body: `Body ${i}`,
+        receivedAt: new Date('2024-01-15T10:00:00Z'),
+      }));
+
+      let callCount = 0;
+      const faultingClassifier: ClassifierPort = {
+        async classify(_email: RawEmail): Promise<EmailClassification> {
+          callCount++;
+          if (callCount % 3 === 0) throw new Error('LLM rate limit');
+          return { type: 'other', companyName: null, roleTitle: null, jobUrl: null, confidence: 0.9 };
+        },
+      };
+
+      const summary = await syncUserGmailWith(USER_ID, {
+        gmail: fakeGmail(emails),
+        classifier: faultingClassifier,
+        db: makeMockKnex(),
+      });
+
+      expect(summary.scanned).toBe(9);
+      expect(summary.errors).toBe(3); // emails 3, 6, 9 had classifier errors
+    });
+  });
 });
