@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import db from '../config/database';
 import logger from '../config/logger';
+import { env } from '../config/env';
 
 // Extend Express Request to include authenticated user
 declare global {
@@ -61,21 +62,9 @@ export async function authenticate(
       return;
     }
 
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      logger.error('JWT_SECRET is not configured');
-      res.status(500).json({
-        error: {
-          message: 'Internal server error',
-          code: 'ERR_INTERNAL',
-        },
-      });
-      return;
-    }
-
     let decoded: JwtPayload;
     try {
-      decoded = jwt.verify(token, secret) as JwtPayload;
+      decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
     } catch (err) {
       const message =
         err instanceof jwt.TokenExpiredError

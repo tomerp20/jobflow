@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
+import { env } from './config/env';
 import logger from './config/logger';
 import apiRouter from './routes/index';
 import { errorHandler } from './middleware/errorHandler';
@@ -12,7 +13,7 @@ const app = express();
 app.use(compression());
 
 // CORS
-const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
+const corsOrigin = env.CORS_ORIGIN;
 app.use(cors({
   origin: corsOrigin.includes(',') ? corsOrigin.split(',').map(s => s.trim()) : corsOrigin,
   credentials: true,

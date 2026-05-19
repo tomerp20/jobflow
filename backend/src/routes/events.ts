@@ -4,6 +4,7 @@ import db from '../config/database';
 import logger from '../config/logger';
 import { pgSubscriber } from '../services/pgSubscriber';
 import { JwtPayload } from '../middleware/auth';
+import { env } from '../config/env';
 
 const router = Router();
 
@@ -26,16 +27,9 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
     return;
   }
 
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    logger.error('JWT_SECRET is not configured');
-    res.status(500).json({ error: 'Internal server error' });
-    return;
-  }
-
   let decoded: JwtPayload;
   try {
-    decoded = jwt.verify(token, secret) as JwtPayload;
+    decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
   } catch {
     res.status(401).json({ error: 'Invalid token' });
     return;

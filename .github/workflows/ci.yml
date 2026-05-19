@@ -61,6 +61,7 @@ jobs:
         run: npm run test:integration
         env:
           INTEGRATION_DATABASE_URL: ${{ secrets.INTEGRATION_DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
   frontend-build:
     name: Frontend Build

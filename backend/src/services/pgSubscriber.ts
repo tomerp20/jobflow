@@ -1,6 +1,7 @@
 import { Client } from 'pg';
 import type { Response } from 'express';
 import logger from '../config/logger';
+import { env } from '../config/env';
 
 const BASE_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 60_000;
@@ -47,15 +48,10 @@ function writeToUser(userId: string, sseEvent: string, data: Record<string, unkn
 }
 
 async function connect(retryDelay = BASE_RETRY_DELAY_MS): Promise<void> {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error('DATABASE_URL environment variable is required for pgSubscriber');
-  }
-
   // Neon routes pooled connections through PgBouncer (transaction mode), which
   // silently accepts LISTEN but never delivers NOTIFY events. Strip '-pooler'
   // from the hostname to force a direct connection for this dedicated listener.
-  const directConnectionString = connectionString.replace('-pooler.', '.');
+  const directConnectionString = env.DATABASE_URL.replace('-pooler.', '.');
 
   const requiresSsl =
     directConnectionString.includes('.render.com') ||

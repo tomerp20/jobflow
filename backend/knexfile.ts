@@ -1,12 +1,10 @@
 import type { Knex } from 'knex';
-import dotenv from 'dotenv';
-
-dotenv.config();
+import { env } from './src/config/env';
 
 const config: { [key: string]: Knex.Config } = {
   development: {
     client: 'pg',
-    connection: process.env.DATABASE_URL || 'postgresql://jobflow:jobflow@localhost:5432/jobflow',
+    connection: env.DATABASE_URL,
     migrations: {
       directory: './migrations',
       extension: 'ts',
@@ -22,7 +20,7 @@ const config: { [key: string]: Knex.Config } = {
   },
   test: {
     client: 'pg',
-    connection: process.env.DATABASE_URL || 'postgresql://jobflow:jobflow@localhost:5432/jobflow_test',
+    connection: env.DATABASE_URL,
     migrations: {
       directory: './migrations',
       extension: 'ts',
@@ -35,7 +33,7 @@ const config: { [key: string]: Knex.Config } = {
   production: {
     client: 'pg',
     connection: {
-      connectionString: process.env.DATABASE_URL,
+      connectionString: env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
     },
     migrations: {

@@ -38,9 +38,10 @@ jest.mock('../src/config/database', () => {
 });
 
 import app from '../src/app';
+import { env } from '../src/config/env';
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret';
+const JWT_SECRET = env.JWT_SECRET;
 
 const MOCK_USER = {
   id: '550e8400-e29b-41d4-a716-446655440000',

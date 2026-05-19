@@ -4,6 +4,7 @@ import db from '../config/database';
 import { authenticate } from '../middleware/auth';
 import { gmailService } from '../services/gmailService';
 import { syncUserGmail } from '../services/gmailSync';
+import { env } from '../config/env';
 
 const router = Router();
 
@@ -28,8 +29,7 @@ router.get('/callback', async (req: Request, res: Response, next: NextFunction) 
   try {
     const { code, state } = req.query as { code: string; state: string };
     await gmailService.handleCallback(code, state);
-    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173';
-    res.redirect(`${frontendUrl}/settings?gmail=connected`);
+    res.redirect(`${env.FRONTEND_URL}/settings?gmail=connected`);
   } catch (err) { next(err); }
 });
 
@@ -49,9 +49,8 @@ router.delete('/disconnect', authenticate, async (req: Request, res: Response, n
 
 router.post('/sync', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const cronKey = process.env.CRON_API_KEY;
     const authHeader = req.headers.authorization ?? '';
-    const isCron = !!cronKey && safeCompare(authHeader, `Bearer ${cronKey}`);
+    const isCron = !!env.CRON_API_KEY && safeCompare(authHeader, `Bearer ${env.CRON_API_KEY}`);
 
     if (isCron) {
       const tokens = await db('gmail_tokens').where({ is_valid: true }).select('user_id');
