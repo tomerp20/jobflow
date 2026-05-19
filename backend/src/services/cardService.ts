@@ -1,6 +1,7 @@
 import { Knex } from 'knex';
 import db from '../config/database';
 import { AppError } from '../middleware/errorHandler';
+import { shiftUp, shiftDown, withTransaction } from '../util/positions';
 
 export interface CardFilters {
   stage?: string;
@@ -405,20 +406,8 @@ export const cardService = {
     const oldPosition = card.position;
 
     const performMove = async (t: Knex.Transaction) => {
-      // Remove from old position: shift cards in old stage down to fill gap
-      await t('cards')
-        .where({ user_id: userId, stage_id: oldStageId })
-        .andWhere('position', '>', oldPosition)
-        .decrement('position', 1);
-
-      // Make room in new position: shift cards in target stage up
-      await t('cards')
-        .where({ user_id: userId, stage_id: stageId })
-        .andWhere('position', '>=', position)
-        .andWhere('id', '!=', cardId)
-        .increment('position', 1);
-
-      // Move the card
+      await shiftDown({ trx: t, table: 'cards', scope: { user_id: userId, stage_id: oldStageId }, fromPos: oldPosition });
+      await shiftUp({ trx: t, table: 'cards', scope: { user_id: userId, stage_id: stageId }, fromPos: position });
       await t('cards')
         .where({ id: cardId })
         .update({
@@ -470,14 +459,10 @@ export const cardService = {
       throw new AppError('Card not found', 404, 'ERR_NOT_FOUND');
     }
 
-    // Delete card (cascade deletes activities)
-    await db('cards').where({ id: cardId, user_id: userId }).del();
-
-    // Shift remaining cards in the stage down to fill gap
-    await db('cards')
-      .where({ user_id: userId, stage_id: card.stage_id })
-      .andWhere('position', '>', card.position)
-      .decrement('position', 1);
+    await withTransaction(db, undefined, async (trx) => {
+      await trx('cards').where({ id: cardId, user_id: userId }).del();
+      await shiftDown({ trx, table: 'cards', scope: { user_id: userId, stage_id: card.stage_id }, fromPos: card.position });
+    });
   },
 
   async addNote(cardId: string, userId: string, note: string) {

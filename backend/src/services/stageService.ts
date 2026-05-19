@@ -1,5 +1,6 @@
 import db from '../config/database';
 import { AppError } from '../middleware/errorHandler';
+import { shiftUp, shiftDown, renumber, withTransaction } from '../util/positions';
 
 export interface StageData {
   name: string;
@@ -17,21 +18,13 @@ export const stageService = {
   },
 
   async createStage(userId: string, data: StageData) {
-    // Shift existing stages at or after this position up by 1
-    await db('stages')
-      .where({ user_id: userId })
-      .andWhere('position', '>=', data.position)
-      .increment('position', 1);
-
-    const [stage] = await db('stages')
-      .insert({
-        user_id: userId,
-        name: data.name,
-        position: data.position,
-      })
-      .returning('*');
-
-    return stage;
+    return withTransaction(db, undefined, async (trx) => {
+      await shiftUp({ trx, table: 'stages', scope: { user_id: userId }, fromPos: data.position });
+      const [stage] = await trx('stages')
+        .insert({ user_id: userId, name: data.name, position: data.position })
+        .returning('*');
+      return stage;
+    });
   },
 
   async updateStage(stageId: string, userId: string, data: Partial<StageData>) {
@@ -43,100 +36,78 @@ export const stageService = {
       throw new AppError('Stage not found', 404, 'ERR_NOT_FOUND');
     }
 
-    if (data.position !== undefined && data.position !== existing.position) {
-      const oldPos = existing.position;
-      const newPos = data.position;
+    return withTransaction(db, undefined, async (trx) => {
+      if (data.position !== undefined && data.position !== existing.position) {
+        const oldPos = existing.position;
+        const newPos = data.position;
 
-      if (newPos > oldPos) {
-        // Moving down: shift stages between old+1 and new down by 1
-        await db('stages')
-          .where({ user_id: userId })
-          .andWhere('position', '>', oldPos)
-          .andWhere('position', '<=', newPos)
-          .decrement('position', 1);
-      } else {
-        // Moving up: shift stages between new and old-1 up by 1
-        await db('stages')
-          .where({ user_id: userId })
-          .andWhere('position', '>=', newPos)
-          .andWhere('position', '<', oldPos)
-          .increment('position', 1);
+        if (newPos > oldPos) {
+          await shiftDown({ trx, table: 'stages', scope: { user_id: userId }, fromPos: oldPos, toPos: newPos });
+        } else {
+          await shiftUp({ trx, table: 'stages', scope: { user_id: userId }, fromPos: newPos, toPos: oldPos - 1 });
+        }
       }
-    }
 
-    const updateData: Record<string, unknown> = {};
-    if (data.name !== undefined) updateData.name = data.name;
-    if (data.position !== undefined) updateData.position = data.position;
-    if (data.width !== undefined) updateData.width = data.width;
+      const updateData: Record<string, unknown> = {};
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.position !== undefined) updateData.position = data.position;
+      if (data.width !== undefined) updateData.width = data.width;
 
-    const [updated] = await db('stages')
-      .where({ id: stageId, user_id: userId })
-      .update(updateData)
-      .returning('*');
+      const [updated] = await trx('stages')
+        .where({ id: stageId, user_id: userId })
+        .update(updateData)
+        .returning('*');
 
-    return updated;
+      return updated;
+    });
   },
 
   async deleteStage(stageId: string, userId: string) {
-    const stage = await db('stages')
-      .where({ id: stageId, user_id: userId })
-      .first();
+    return withTransaction(db, undefined, async (trx) => {
+      const stage = await trx('stages').where({ id: stageId, user_id: userId }).first();
 
-    if (!stage) {
-      throw new AppError('Stage not found', 404, 'ERR_NOT_FOUND');
-    }
+      if (!stage) {
+        throw new AppError('Stage not found', 404, 'ERR_NOT_FOUND');
+      }
 
-    // Prevent deleting the last remaining stage
-    const stageCount = await db('stages')
-      .where({ user_id: userId })
-      .count('id as count')
-      .first();
-
-    if (Number(stageCount?.count) <= 1) {
-      throw new AppError('Cannot delete the last stage', 400, 'ERR_LAST_STAGE');
-    }
-
-    // Find the first stage (lowest position) that isn't the one being deleted
-    const fallbackStage = await db('stages')
-      .where({ user_id: userId })
-      .whereNot({ id: stageId })
-      .orderBy('position', 'asc')
-      .first();
-
-    // Move all cards from the deleted stage to the fallback stage
-    const movedCount = await db('cards')
-      .where({ stage_id: stageId, user_id: userId })
-      .update({ stage_id: fallbackStage.id });
-
-    // If cards were moved, append them after existing cards in fallback stage
-    if (movedCount > 0) {
-      const maxPos = await db('cards')
-        .where({ stage_id: fallbackStage.id, user_id: userId })
-        .max('position as max')
+      const stageCount = await trx('stages')
+        .where({ user_id: userId })
+        .count('id as count')
         .first();
 
-      // Re-number all cards in fallback stage by position
-      const fallbackCards = await db('cards')
-        .where({ stage_id: fallbackStage.id, user_id: userId })
-        .orderBy('position', 'asc');
-
-      for (let i = 0; i < fallbackCards.length; i++) {
-        await db('cards')
-          .where({ id: fallbackCards[i].id })
-          .update({ position: i });
+      if (Number(stageCount?.count) <= 1) {
+        throw new AppError('Cannot delete the last stage', 400, 'ERR_LAST_STAGE');
       }
-    }
 
-    // Delete the stage
-    await db('stages').where({ id: stageId }).del();
+      const fallbackStage = await trx('stages')
+        .where({ user_id: userId })
+        .whereNot({ id: stageId })
+        .orderBy('position', 'asc')
+        .first();
 
-    // Shift remaining stage positions to fill the gap
-    await db('stages')
-      .where({ user_id: userId })
-      .andWhere('position', '>', stage.position)
-      .decrement('position', 1);
+      const movedCount = await trx('cards')
+        .where({ stage_id: stageId, user_id: userId })
+        .update({ stage_id: fallbackStage.id });
 
-    return { deletedStage: stage, movedCardsTo: fallbackStage, movedCardCount: movedCount };
+      if (movedCount > 0) {
+        const fallbackCards = await trx('cards')
+          .where({ stage_id: fallbackStage.id, user_id: userId })
+          .orderBy('position', 'asc');
+
+        await renumber({
+          trx,
+          table: 'cards',
+          scope: { user_id: userId, stage_id: fallbackStage.id },
+          orderedIds: fallbackCards.map((c: { id: string }) => c.id),
+        });
+      }
+
+      await trx('stages').where({ id: stageId }).del();
+
+      await shiftDown({ trx, table: 'stages', scope: { user_id: userId }, fromPos: stage.position });
+
+      return { deletedStage: stage, movedCardsTo: fallbackStage, movedCardCount: movedCount };
+    });
   },
 
   async reorderStages(userId: string, stageIds: string[]) {
@@ -157,12 +128,8 @@ export const stageService = {
       throw new AppError('All stages must be included in reorder', 400, 'ERR_INCOMPLETE_REORDER');
     }
 
-    await db.transaction(async (trx) => {
-      for (let i = 0; i < stageIds.length; i++) {
-        await trx('stages')
-          .where({ id: stageIds[i], user_id: userId })
-          .update({ position: i });
-      }
+    await withTransaction(db, undefined, async (trx) => {
+      await renumber({ trx, table: 'stages', scope: { user_id: userId }, orderedIds: stageIds });
     });
 
     return db('stages')

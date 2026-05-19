@@ -50,6 +50,16 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
+// Make mockTransaction execute its callback so withTransaction() works in all tests.
+// Tests that need custom transaction behaviour override this in the test body.
+beforeEach(() => {
+  mockTransaction.mockImplementation(async (callback: (trx: any) => Promise<unknown>) => {
+    const trx: any = (tableName: string) => mockDb(tableName);
+    trx.fn = { now: jest.fn().mockReturnValue('2026-01-01T00:00:00.000Z') };
+    return callback(trx);
+  });
+});
+
 // =============================================================================
 // CREATE STAGE
 // =============================================================================
@@ -169,27 +179,17 @@ describe('StageService - deleteStage', () => {
       if (tableName === 'cards') {
         cardsCallCount++;
         if (cardsCallCount === 1) {
-          // move cards - update stage_id
+          // move cards to fallback stage
           const chain = createQueryChain(undefined);
           chain.where = jest.fn().mockReturnValue({
             update: jest.fn().mockResolvedValue(2), // 2 cards moved
           });
           return chain;
         } else if (cardsCallCount === 2) {
-          // max position in fallback
-          const chain = createQueryChain(undefined);
-          chain.where = jest.fn().mockReturnValue({
-            max: jest.fn().mockReturnValue({
-              first: jest.fn().mockResolvedValue({ max: 3 }),
-            }),
-          });
-          return chain;
-        } else {
-          // re-number cards
+          // list fallback cards for renumber
           const chain = createQueryChain(undefined);
           chain.where = jest.fn().mockReturnValue(chain);
           chain.orderBy = jest.fn().mockReturnValue(chain);
-          // return cards array for re-numbering
           (chain as any).then = (resolve: (v: unknown) => void) =>
             Promise.resolve([
               { id: 'card-1', position: 0 },
@@ -197,6 +197,11 @@ describe('StageService - deleteStage', () => {
               { id: 'card-3', position: 2 },
               { id: 'card-4', position: 3 },
             ]).then(resolve);
+          return chain;
+        } else {
+          // renumber phase 1 and phase 2 updates
+          const chain = createQueryChain(undefined);
+          chain.where = jest.fn().mockReturnValue(chain);
           chain.update = jest.fn().mockResolvedValue(1);
           return chain;
         }

@@ -83,6 +83,15 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
+// Make mockTransaction execute its callback so withTransaction() works in all tests.
+beforeEach(() => {
+  mockTransaction.mockImplementation(async (callback: (trx: any) => Promise<unknown>) => {
+    const trx: any = (tableName: string) => mockDb(tableName);
+    trx.fn = { now: jest.fn().mockReturnValue('2026-01-01T00:00:00.000Z') };
+    return callback(trx);
+  });
+});
+
 // Helper to set up mockDb per table
 function setupDbMock(tableResponses: Record<string, ReturnType<typeof createQueryChain>>) {
   mockDb.mockImplementation((tableName: string) => {
