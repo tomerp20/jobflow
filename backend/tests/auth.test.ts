@@ -63,8 +63,8 @@ afterEach(() => {
 });
 
 // ── Helper: generate a valid access token ────────────────────────────────────
-function generateValidToken(userId: string, email: string): string {
-  return jwt.sign({ userId, email }, JWT_SECRET, { expiresIn: '15m' });
+function generateValidToken(userId: string, email: string, name: string = 'Test User'): string {
+  return jwt.sign({ userId, email, name }, JWT_SECRET, { expiresIn: '15m' });
 }
 
 // ── Helper: configure mockDb for a specific test scenario ────────────────────
@@ -284,20 +284,7 @@ describe('Auth - POST /api/auth/login', () => {
 
 describe('Auth - GET /api/auth/me', () => {
   it('should return user data with valid auth token', async () => {
-    const token = generateValidToken(MOCK_USER.id, MOCK_USER.email);
-
-    const usersChain = createQueryChain(undefined);
-    usersChain.select = jest.fn().mockReturnValue({
-      where: jest.fn().mockReturnValue({
-        first: jest.fn().mockResolvedValue({
-          id: MOCK_USER.id,
-          email: MOCK_USER.email,
-          name: MOCK_USER.name,
-        }),
-      }),
-    });
-
-    setupDbMock({ users: usersChain });
+    const token = generateValidToken(MOCK_USER.id, MOCK_USER.email, MOCK_USER.name);
 
     const res = await request(app)
       .get('/api/auth/me')
