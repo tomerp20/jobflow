@@ -54,7 +54,13 @@ export interface SyncSummary {
 
 const MAX_VARCHAR_255 = 255;
 const CONFIDENCE_THRESHOLD = 0.9;
-const CLASSIFY_CONCURRENCY = Number(process.env.GMAIL_CLASSIFY_CONCURRENCY ?? 5);
+// Parse and validate the concurrency cap once at module load.
+// Defends against NaN ("abc"), 0, and negative values that would silently
+// produce zero workers (returning undefined slots) or throw RangeError.
+const RAW_CLASSIFY_CONCURRENCY = Number(process.env.GMAIL_CLASSIFY_CONCURRENCY);
+const CLASSIFY_CONCURRENCY = Number.isFinite(RAW_CLASSIFY_CONCURRENCY) && RAW_CLASSIFY_CONCURRENCY >= 1
+  ? Math.floor(RAW_CLASSIFY_CONCURRENCY)
+  : 5;
 
 type ProcessedAction =
   | 'receipt_created'
@@ -82,7 +88,7 @@ async function mapWithConcurrency<T, R>(
   limit: number,
   fn: (item: T) => Promise<R>,
 ): Promise<R[]> {
-  const results: R[] = new Array(items.length);
+  const results = new Array<R>(items.length);
   let cursor = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (true) {
