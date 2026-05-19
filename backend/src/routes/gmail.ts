@@ -47,13 +47,22 @@ router.delete('/disconnect', authenticate, async (req: Request, res: Response, n
   } catch (err) { next(err); }
 });
 
-router.post('/sync', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const cronKey = process.env.CRON_API_KEY;
-    const authHeader = req.headers.authorization ?? '';
-    const isCron = !!cronKey && safeCompare(authHeader, `Bearer ${cronKey}`);
+function syncAuth(req: Request, res: Response, next: NextFunction): void {
+  const cronKey = process.env.CRON_API_KEY;
+  const authHeader = req.headers.authorization ?? '';
 
-    if (isCron) {
+  if (cronKey && safeCompare(authHeader, `Bearer ${cronKey}`)) {
+    req.isCronRequest = true;
+    next();
+    return;
+  }
+
+  authenticate(req, res, next);
+}
+
+router.post('/sync', syncAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (req.isCronRequest) {
       const tokens = await db('gmail_tokens').where({ is_valid: true }).select('user_id');
       const results: Record<string, unknown> = {};
       for (const { user_id } of tokens) {
@@ -62,11 +71,7 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
       return res.json({ results });
     }
 
-    await new Promise<void>((resolve, reject) => {
-      authenticate(req as Request, res as Response, (err?: unknown) => (err ? reject(err) : resolve()));
-    });
-
-    const summary = await syncUserGmail((req as Request).user!.id);
+    const summary = await syncUserGmail(req.user!.id);
     res.json({ data: summary });
   } catch (err) { next(err); }
 });

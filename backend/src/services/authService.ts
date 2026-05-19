@@ -52,11 +52,11 @@ function hashToken(token: string): string {
  * Generate an access token and a refresh token for the given user.
  * The refresh token is a random UUID whose SHA-256 hash is stored in the DB.
  */
-async function generateTokens(userId: string, email: string): Promise<TokenPair> {
+async function generateTokens(userId: string, email: string, name: string): Promise<TokenPair> {
   const secret = getJwtSecret();
 
   const accessToken = jwt.sign(
-    { userId, email },
+    { userId, email, name },
     secret,
     { expiresIn: ACCESS_TOKEN_EXPIRY }
   );
@@ -118,7 +118,7 @@ async function signup(
 
   await createDefaultStages(user.id);
 
-  const tokens = await generateTokens(user.id, user.email);
+  const tokens = await generateTokens(user.id, user.email, user.name);
 
   logger.info('User signed up', { userId: user.id, email: user.email });
 
@@ -149,7 +149,7 @@ async function login(
     throw new AppError('Invalid email or password', 401, 'ERR_INVALID_CREDENTIALS');
   }
 
-  const tokens = await generateTokens(user.id, user.email);
+  const tokens = await generateTokens(user.id, user.email, user.name);
 
   logger.info('User logged in', { userId: user.id });
 
@@ -189,7 +189,7 @@ async function refreshTokens(
   // Rotate: delete old token then issue new pair
   await db('refresh_tokens').where({ id: storedToken.id }).del();
 
-  const tokens = await generateTokens(user.id, user.email);
+  const tokens = await generateTokens(user.id, user.email, user.name);
 
   logger.info('Tokens refreshed', { userId: user.id });
 
