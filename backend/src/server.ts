@@ -1,12 +1,9 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
+import './config/env';
+import { env } from './config/env';
 import app from './app';
 import logger from './config/logger';
 import db from './config/database';
 import { pgSubscriber } from './services/pgSubscriber';
-
-const PORT = parseInt(process.env.PORT || '3001', 10);
 
 async function start() {
   // Verify database connection
@@ -20,10 +17,10 @@ async function start() {
 
   pgSubscriber.connect(); // non-blocking: retries in background on failure
 
-  app.listen(PORT, () => {
+  app.listen(env.PORT, () => {
     logger.info('JobFlow API server started', {
-      port: PORT,
-      environment: process.env.NODE_ENV || 'development',
+      port: env.PORT,
+      environment: env.NODE_ENV,
       pid: process.pid,
     });
   });

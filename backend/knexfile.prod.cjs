@@ -1,12 +1,11 @@
-require('dotenv').config();
+const { env } = require('./dist/config/env.js');
 
-const dbUrl = process.env.DATABASE_URL || '';
-const requiresSsl = dbUrl.includes('.render.com') || dbUrl.includes('.neon.tech');
+const requiresSsl = env.DATABASE_URL.includes('.render.com') || env.DATABASE_URL.includes('.neon.tech');
 
 module.exports = {
   client: 'pg',
   connection: {
-    connectionString: dbUrl,
+    connectionString: env.DATABASE_URL,
     ssl: requiresSsl ? { rejectUnauthorized: false } : false,
   },
   searchPath: ['public'],
