@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../config/database';
 import logger from '../config/logger';
 import { AppError } from '../middleware/errorHandler';
+import { env } from '../config/env';
 
 const SALT_ROUNDS = 10;
 const ACCESS_TOKEN_EXPIRY = '15m';
@@ -36,14 +37,6 @@ interface UserRecord {
   updated_at: Date;
 }
 
-function getJwtSecret(): string {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new AppError('JWT_SECRET is not configured', 500, 'ERR_CONFIG');
-  }
-  return secret;
-}
-
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
@@ -53,11 +46,9 @@ function hashToken(token: string): string {
  * The refresh token is a random UUID whose SHA-256 hash is stored in the DB.
  */
 async function generateTokens(userId: string, email: string): Promise<TokenPair> {
-  const secret = getJwtSecret();
-
   const accessToken = jwt.sign(
     { userId, email },
-    secret,
+    env.JWT_SECRET,
     { expiresIn: ACCESS_TOKEN_EXPIRY }
   );
 

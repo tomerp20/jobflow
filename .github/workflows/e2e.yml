@@ -39,6 +39,7 @@ jobs:
         working-directory: backend
         env:
           DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
       - name: Seed test DB
         run: npm run seed:test
@@ -64,7 +65,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          NODE_ENV: production
+          NODE_ENV: test
           PORT: 3001
           # Allow the E2E frontend origin (direct cross-origin requests when
           # the browser calls localhost:3001 directly from localhost:4173)

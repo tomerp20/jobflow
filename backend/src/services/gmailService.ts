@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import db from '../config/database';
 import { notificationService } from './notificationService';
 import { AppError } from '../middleware/errorHandler';
+import { env } from '../config/env';
 
 const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
 // OAuth state nonces expire after 10 minutes
@@ -10,9 +11,9 @@ const OAUTH_STATE_TTL_S = 10 * 60;
 
 function createOAuthClient() {
   return new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URI ?? `${process.env.BACKEND_URL}/api/gmail/callback`
+    env.GOOGLE_CLIENT_ID,
+    env.GOOGLE_CLIENT_SECRET,
+    env.GOOGLE_REDIRECT_URI ?? `${env.BACKEND_URL}/api/gmail/callback`
   );
 }
 
@@ -22,9 +23,7 @@ function createOAuthClient() {
  * The JWT is signed with JWT_SECRET and expires in 10 minutes.
  */
 function createOAuthStateToken(userId: string): string {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new AppError('JWT_SECRET is not configured', 500, 'ERR_INTERNAL');
-  return jwt.sign({ userId, purpose: 'oauth_state' }, secret, { expiresIn: OAUTH_STATE_TTL_S });
+  return jwt.sign({ userId, purpose: 'oauth_state' }, env.JWT_SECRET, { expiresIn: OAUTH_STATE_TTL_S });
 }
 
 /**
@@ -32,10 +31,8 @@ function createOAuthStateToken(userId: string): string {
  * Throws AppError(400) if the token is missing, tampered with, or expired.
  */
 function verifyOAuthStateToken(state: string): string {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new AppError('JWT_SECRET is not configured', 500, 'ERR_INTERNAL');
   try {
-    const payload = jwt.verify(state, secret) as { userId: string; purpose: string };
+    const payload = jwt.verify(state, env.JWT_SECRET) as { userId: string; purpose: string };
     if (payload.purpose !== 'oauth_state') throw new Error('wrong purpose');
     return payload.userId;
   } catch {

@@ -2,6 +2,7 @@ import { generateObject } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { z } from 'zod';
+import { env } from '../config/env';
 
 const classificationSchema = z.object({
   type: z.enum(['rejection', 'application_receipt', 'other']),
@@ -16,30 +17,17 @@ const classificationSchema = z.object({
 
 export type EmailClassification = z.infer<typeof classificationSchema>;
 
-// Instantiate providers once at module level rather than on every call.
-// Warn at startup if the active provider's key is missing so misconfiguration
-// is caught early rather than surfacing as a cryptic SDK error at runtime.
-const activeProvider = process.env.LLM_PROVIDER ?? 'google';
-if (activeProvider === 'google' && !process.env.GOOGLE_AI_API_KEY) {
-  console.warn('[emailClassifier] GOOGLE_AI_API_KEY is not set — email classification will fail');
-}
-if (activeProvider === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
-  console.warn('[emailClassifier] ANTHROPIC_API_KEY is not set — email classification will fail');
-}
-
 // Only instantiate the active provider's client — the inactive provider's API
 // key may be absent, and some SDKs validate at construction time.
-const anthropicProvider = activeProvider === 'anthropic'
-  ? createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const anthropicProvider = env.LLM_PROVIDER === 'anthropic'
+  ? createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })
   : null;
-const googleProvider = activeProvider === 'google'
-  ? createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_AI_API_KEY })
+const googleProvider = env.LLM_PROVIDER === 'google'
+  ? createGoogleGenerativeAI({ apiKey: env.GOOGLE_AI_API_KEY })
   : null;
 
 function getModel() {
-  // Use the module-level constant — avoids re-reading env per call and keeps
-  // getModel() consistent with the startup warning above.
-  switch (activeProvider) {
+  switch (env.LLM_PROVIDER) {
     case 'anthropic':
       return anthropicProvider!('claude-3-haiku-20240307');
     case 'google':
