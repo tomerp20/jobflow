@@ -19,7 +19,7 @@ const router = Router();
  * access logs and browser history. Ensure any access-log middleware (e.g.
  * morgan) is configured to redact the `token` query param on this route.
  */
-router.get('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/', (req: Request, res: Response, next: NextFunction): void => {
   const token = req.query.token as string;
 
   if (!token) {
@@ -31,6 +31,11 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
   try {
     decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
   } catch {
+    next(new AppError('Invalid token', 401, 'ERR_INVALID_TOKEN'));
+    return;
+  }
+
+  if (typeof decoded.userId !== 'string' || decoded.userId.length === 0) {
     next(new AppError('Invalid token', 401, 'ERR_INVALID_TOKEN'));
     return;
   }
