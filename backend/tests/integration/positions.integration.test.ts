@@ -1,5 +1,6 @@
 import { destroyDb, getDb, truncateAll } from './db';
 import { shiftUp, shiftDown, renumber, withTransaction } from '../../src/util/positions';
+import { cardService } from '../../src/services/cardService';
 
 const EMAIL = 'positions-test@integration.test';
 const OTHER_EMAIL = 'positions-other@integration.test';
@@ -311,6 +312,46 @@ describe('card scope isolation', () => {
 
     expect(await cardPositions(stage1)).toEqual([0, 0, 1]);
     expect(await cardPositions(stage2)).toEqual([0, 1]); // untouched
+  });
+});
+
+// ── moveCard within the same stage (drag-within-column) ─────────────────────
+
+describe('cardService.moveCard — same stage', () => {
+  it('produces correct final positions when moving down within a column', async () => {
+    const s = await insertStage(0);
+    const c0 = await insertCard(s, 0);
+    const c1 = await insertCard(s, 1);
+    const c2 = await insertCard(s, 2);
+    const c3 = await insertCard(s, 3);
+    const c4 = await insertCard(s, 4);
+
+    // Drag the bottom card (position 4) to the top (position 0)
+    await cardService.moveCard(c4, userId, s, 0);
+
+    const rows = await getDb()('cards')
+      .where({ user_id: userId, stage_id: s })
+      .orderBy('position');
+    expect(rows.map((r: { id: string }) => r.id)).toEqual([c4, c0, c1, c2, c3]);
+    expect(rows.map((r: { position: number }) => r.position)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('produces correct final positions when moving up within a column', async () => {
+    const s = await insertStage(0);
+    const c0 = await insertCard(s, 0);
+    const c1 = await insertCard(s, 1);
+    const c2 = await insertCard(s, 2);
+    const c3 = await insertCard(s, 3);
+    const c4 = await insertCard(s, 4);
+
+    // Drag position 0 down to position 3
+    await cardService.moveCard(c0, userId, s, 3);
+
+    const rows = await getDb()('cards')
+      .where({ user_id: userId, stage_id: s })
+      .orderBy('position');
+    expect(rows.map((r: { id: string }) => r.id)).toEqual([c1, c2, c3, c0, c4]);
+    expect(rows.map((r: { position: number }) => r.position)).toEqual([0, 1, 2, 3, 4]);
   });
 });
 

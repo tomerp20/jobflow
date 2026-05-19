@@ -1,5 +1,11 @@
 import { Knex } from 'knex';
 
+// CONTRACT: tables passed to renumber/shiftUp/shiftDown must NOT have a
+// non-deferrable UNIQUE (scope, position) index. The helpers transiently
+// duplicate positions inside a transaction. If you add such an index, ensure
+// it is DEFERRABLE INITIALLY DEFERRED (see migration 010 for the stages
+// table — cards and todo_items currently have no such constraint).
+
 export type Scope = Record<string, string | number>;
 
 export interface ShiftArgs {
@@ -18,22 +24,24 @@ export interface RenumberArgs {
   idColumn?: string;
 }
 
-export async function shiftUp(args: ShiftArgs): Promise<number> {
+export async function shiftUp(args: ShiftArgs): Promise<void> {
   const { trx, table, scope, fromPos, toPos } = args;
   let q = trx(table).where(scope).andWhere('position', '>=', fromPos);
   if (toPos !== undefined) q = q.andWhere('position', '<=', toPos);
-  return q.increment('position', 1);
+  await q.increment('position', 1);
 }
 
-export async function shiftDown(args: ShiftArgs): Promise<number> {
+export async function shiftDown(args: ShiftArgs): Promise<void> {
   const { trx, table, scope, fromPos, toPos } = args;
   let q = trx(table).where(scope).andWhere('position', '>', fromPos);
   if (toPos !== undefined) q = q.andWhere('position', '<=', toPos);
-  return q.decrement('position', 1);
+  await q.decrement('position', 1);
 }
 
 // Two-phase to avoid UNIQUE(scope, position) constraint violations within a transaction.
 // Phase 1 moves rows to unique negative sentinels; phase 2 assigns final 0..N-1 positions.
+// TODO(scale): collapse each phase to a single UPDATE ... FROM (VALUES (id, pos), ...)
+// once collections grow beyond ~100 items — current 2N round-trips are fine for ≤100.
 export async function renumber(args: RenumberArgs): Promise<void> {
   const { trx, table, scope, orderedIds, idColumn = 'id' } = args;
   const N = orderedIds.length;
