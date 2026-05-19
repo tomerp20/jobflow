@@ -72,6 +72,8 @@ interface ClassifiedEmail {
   classification: EmailClassification | null;
 }
 
+type TrxResult = { newCard: { id: string; company_name: string; role_title: string } } | null;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Errors from Gaxios/Axios carry a `config` field that includes the request
@@ -196,6 +198,18 @@ export async function syncUserGmailWith(
       .select('cards.*', 'stages.name as stage_name'),
   ]);
 
+  // Mutable list seeded from the hoisted userCards, fed into processReceipt
+  // so it doesn't have to SELECT per email. Appended ONLY after a transaction
+  // commits with a newly-created card — never inside the trx callback, so a
+  // rolled-back trx leaves no stale entry that could cause the next email
+  // to falsely report receipt_already_tracked.
+  const userCardsForReceipt: Array<{ id: string; company_name: string; role_title: string }> =
+    userCards.map((c: { id: string; company_name: string; role_title: string }) => ({
+      id: c.id,
+      company_name: c.company_name,
+      role_title: c.role_title,
+    }));
+
   // ── Process emails — one short transaction per email ─────────────────────
   for (const { email, classification } of classified) {
     try {
@@ -223,7 +237,7 @@ export async function syncUserGmailWith(
         }
       }
 
-      await knex.transaction(async (trx) => {
+      const trxResult = await knex.transaction(async (trx): Promise<TrxResult> => {
         // Serialises all DB writes for this user across concurrent sync calls.
         // Lock is acquired and released per email — shorter hold than per-batch.
         await trx.raw('SELECT pg_advisory_xact_lock(hashtext(?))', [`gmail_sync:${userId}`]);
@@ -233,7 +247,7 @@ export async function syncUserGmailWith(
         const alreadyDone = await trx('processed_emails')
           .where({ user_id: userId, gmail_message_id: email.messageId })
           .first();
-        if (alreadyDone) return;
+        if (alreadyDone) return null;
 
         if (classification === null) {
           await trx('processed_emails').insert({
@@ -244,7 +258,7 @@ export async function syncUserGmailWith(
             received_at: email.receivedAt,
             action: 'classifier_error' as ProcessedAction,
           }).onConflict(['user_id', 'gmail_message_id']).ignore();
-          return;
+          return null;
         }
 
         const baseLog = {
@@ -262,8 +276,7 @@ export async function syncUserGmailWith(
         };
 
         if (classification.type === 'application_receipt') {
-          await processReceipt(trx, userId, email, classification as EmailClassification & { type: 'application_receipt' }, baseLog, summary, preResolvedIconUrl);
-          return;
+          return processReceipt(trx, userId, email, classification as EmailClassification & { type: 'application_receipt' }, baseLog, summary, preResolvedIconUrl, userCardsForReceipt);
         }
 
         if (classification.type === 'other') {
@@ -271,12 +284,19 @@ export async function syncUserGmailWith(
             .insert({ ...baseLog, action: 'not_actionable' as ProcessedAction })
             .onConflict(['user_id', 'gmail_message_id']).ignore();
           summary.notActionable++;
-          return;
+          return null;
         }
 
         // classification.type === 'rejection'
         await processRejection(trx, userId, email, classification as EmailClassification & { type: 'rejection' }, baseLog, rejectionStage, userCards, summary);
+        return null;
       });
+
+      // Append the new card to the in-memory list ONLY after the transaction
+      // commits — guarantees a rolled-back trx leaves no stale entry behind.
+      if (trxResult?.newCard) {
+        userCardsForReceipt.push(trxResult.newCard);
+      }
     } catch (err) {
       logger.error('gmailSync per-email failure', { userId, messageId: email.messageId, error: safeError(err) });
       // Best-effort audit row outside the failed transaction — a failed tx cannot
@@ -315,7 +335,8 @@ async function processReceipt(
   baseLog: Record<string, unknown>,
   summary: SyncSummary,
   preResolvedIconUrl: string | null | undefined,
-): Promise<void> {
+  userCardsForReceipt: ReadonlyArray<{ id: string; company_name: string; role_title: string }>,
+): Promise<TrxResult> {
   const { companyName, roleTitle, jobUrl, confidence } = classification;
 
   if (!Number.isFinite(confidence) || confidence < CONFIDENCE_THRESHOLD || companyName === null) {
@@ -329,7 +350,7 @@ async function processReceipt(
       metadata: { companyName, roleTitle, confidence },
     });
     summary.receiptsLowConfidence++;
-    return;
+    return null;
   }
 
   const appliedStage = await trx('stages').where({ user_id: userId, is_applied_stage: true }).first();
@@ -349,21 +370,13 @@ async function processReceipt(
     );
   }
 
-  // Exclude rejection-stage cards so a previously-rejected application does
-  // not block a fresh receipt for the same company+role from creating a new
-  // card. This mirrors the rejection path's scope and lets users re-apply.
-  // We query inside the trx (not the hoisted userCards) so we see cards
-  // created by earlier emails in the same batch — preventing in-batch
-  // duplicate creation.
-  const existingCards: { id: string; company_name: string; role_title: string }[] = await trx('cards')
-    .join('stages', 'cards.stage_id', 'stages.id')
-    .where({ 'cards.user_id': userId })
-    .where('stages.is_rejection_stage', false)
-    .select('cards.id', 'cards.company_name', 'cards.role_title');
-
   const finalRoleTitle = roleTitle ?? 'Unknown Role';
 
-  const matchedCard = existingCards.find(card =>
+  // Match against the hoisted in-memory list. The caller seeds it once before
+  // the per-email loop and appends only after each trx commits, so this list
+  // sees cards from earlier *committed* emails in the same batch — preserving
+  // in-batch dedup without a per-email SELECT.
+  const matchedCard = userCardsForReceipt.find(card =>
     companyMatch(card.company_name, companyName) &&
     roleMatch(card.role_title, finalRoleTitle),
   );
@@ -379,7 +392,7 @@ async function processReceipt(
       metadata: { companyName, roleTitle, matchedCardId: matchedCard.id },
     });
     summary.receiptsAlreadyTracked++;
-    return;
+    return null;
   }
 
   // Threading `trx` makes the card INSERT atomic with the processed_emails
@@ -417,6 +430,10 @@ async function processReceipt(
   });
 
   summary.receiptsCreated++;
+  // Use the persisted row values rather than the extracted strings so the
+  // in-memory list stays the row-of-record even if createCard ever normalises
+  // names on write.
+  return { newCard: { id: card.id, company_name: card.company_name, role_title: card.role_title } };
 }
 
 // ── Rejection path ────────────────────────────────────────────────────────────
