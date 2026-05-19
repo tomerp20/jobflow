@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { timingSafeEqual, createHash } from 'crypto';
 import db from '../config/database';
 import { authenticate } from '../middleware/auth';
+import logger from '../config/logger';
 import { gmailService } from '../services/gmailService';
 import { syncUserGmail } from '../services/gmailSync';
 
@@ -57,7 +58,11 @@ function syncAuth(req: Request, res: Response, next: NextFunction): void {
     return;
   }
 
-  authenticate(req, res, next);
+  if (cronKey) {
+    logger.warn('syncAuth: Authorization header did not match CRON_API_KEY — falling through to JWT auth');
+  }
+
+  authenticate(req, res, next).catch(next);
 }
 
 router.post('/sync', syncAuth, async (req: Request, res: Response, next: NextFunction) => {

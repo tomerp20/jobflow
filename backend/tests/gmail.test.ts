@@ -87,6 +87,48 @@ describe('POST /api/gmail/sync — cron path', () => {
     expect(syncUserGmail).toHaveBeenCalledTimes(1);
   });
 
+  it('should return empty results when no valid gmail tokens exist', async () => {
+    process.env.CRON_API_KEY = CRON_API_KEY;
+
+    const gmailTokensChain = createQueryChain([]);
+    mockDb.mockImplementation((tableName: string) => {
+      if (tableName === 'gmail_tokens') return gmailTokensChain;
+      return createQueryChain(undefined);
+    });
+
+    const res = await request(app)
+      .post('/api/gmail/sync')
+      .set('Authorization', `Bearer ${CRON_API_KEY}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual({});
+    expect(syncUserGmail).not.toHaveBeenCalled();
+  });
+
+  it('should sync each user independently when multiple tokens exist', async () => {
+    process.env.CRON_API_KEY = CRON_API_KEY;
+    const USER_ID_2 = '660f9511-f3ac-52e5-b827-557766551111';
+
+    const gmailTokensChain = createQueryChain([{ user_id: USER_ID }, { user_id: USER_ID_2 }]);
+    mockDb.mockImplementation((tableName: string) => {
+      if (tableName === 'gmail_tokens') return gmailTokensChain;
+      return createQueryChain(undefined);
+    });
+
+    (syncUserGmail as jest.Mock)
+      .mockResolvedValueOnce({ scanned: 3, receiptsCreated: 1 })
+      .mockResolvedValueOnce({ scanned: 7, receiptsCreated: 2 });
+
+    const res = await request(app)
+      .post('/api/gmail/sync')
+      .set('Authorization', `Bearer ${CRON_API_KEY}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.results[USER_ID]).toMatchObject({ scanned: 3, receiptsCreated: 1 });
+    expect(res.body.results[USER_ID_2]).toMatchObject({ scanned: 7, receiptsCreated: 2 });
+    expect(syncUserGmail).toHaveBeenCalledTimes(2);
+  });
+
   it('should return 401 when CRON_API_KEY is wrong', async () => {
     process.env.CRON_API_KEY = CRON_API_KEY;
 
@@ -95,6 +137,17 @@ describe('POST /api/gmail/sync — cron path', () => {
       .set('Authorization', 'Bearer wrong-key');
 
     // Wrong cron key is passed to authenticate as a JWT — rejected as invalid token
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('ERR_INVALID_TOKEN');
+  });
+
+  it('should fall through to JWT auth when CRON_API_KEY is not configured', async () => {
+    // CRON_API_KEY unset — afterEach already handles cleanup, nothing to set here
+    const res = await request(app)
+      .post('/api/gmail/sync')
+      .set('Authorization', 'Bearer some-cron-looking-value');
+
+    // syncAuth has no cronKey to compare against, falls to authenticate which rejects it as bad JWT
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('ERR_INVALID_TOKEN');
   });
