@@ -21,6 +21,9 @@ export default async function globalSetup(): Promise<void> {
       ...process.env,
       DATABASE_URL: integrationUrl,
       NODE_ENV: 'test',
+      // env.ts validates JWT_SECRET at import time; migrations don't use JWT but
+      // knexfile.ts imports env, so a placeholder satisfying min(32) is required.
+      JWT_SECRET: process.env.JWT_SECRET ?? 'test-jwt-secret-for-migrations-32chars!!',
     },
   });
 }

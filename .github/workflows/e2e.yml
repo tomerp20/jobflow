@@ -39,6 +39,7 @@ jobs:
         working-directory: backend
         env:
           DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
       - name: Seed test DB
         run: npm run seed:test
