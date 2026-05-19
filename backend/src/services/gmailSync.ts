@@ -105,8 +105,13 @@ function truncate(value: string | null | undefined, max = MAX_VARCHAR_255): stri
 
 // Strips non-letter/non-digit characters (Unicode-aware) and lowercases.
 // The `u` flag enables \p{L} (any letter) and \p{N} (any digit) Unicode property escapes.
+// NFC normalization is applied first so that the same visually identical name in
+// composed (NFC) and decomposed (NFD) form produces the same output — combining
+// marks (\p{M}) are not letters and would otherwise be stripped, e.g. NFD
+// `"Société"` would lose its acute accents while NFC `"Société"`
+// would keep them, causing companyMatch to falsely diverge.
 export function normalize(str: string): string {
-  return str.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  return str.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 // Canonical company match — used for both receipt and rejection paths.

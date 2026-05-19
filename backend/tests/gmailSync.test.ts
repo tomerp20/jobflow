@@ -302,6 +302,12 @@ describe('companyMatch', () => {
   it('matches accented-Latin company names', () => {
     expect(companyMatch('Société Générale', 'Société Générale')).toBe(true);
   });
+
+  it('matches the same name in NFC vs NFD form', () => {
+    const nfc = 'Société Générale';            // 'é' = U+00E9 (precomposed)
+    const nfd = 'Société Générale';        // 'e' + U+0301 (combining acute)
+    expect(companyMatch(nfc, nfd)).toBe(true);
+  });
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
