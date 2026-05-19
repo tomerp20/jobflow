@@ -17,6 +17,19 @@ const classificationSchema = z.object({
 
 export type EmailClassification = z.infer<typeof classificationSchema>;
 
+// Warn at startup in dev/test when the active provider's key is missing — in
+// production the superRefine block in env.ts enforces this at boot.
+if (env.NODE_ENV !== 'production') {
+  if (env.LLM_PROVIDER === 'google' && !env.GOOGLE_AI_API_KEY) {
+    // eslint-disable-next-line no-console
+    console.warn('[emailClassifier] GOOGLE_AI_API_KEY is not set — email classification will fail');
+  }
+  if (env.LLM_PROVIDER === 'anthropic' && !env.ANTHROPIC_API_KEY) {
+    // eslint-disable-next-line no-console
+    console.warn('[emailClassifier] ANTHROPIC_API_KEY is not set — email classification will fail');
+  }
+}
+
 // Only instantiate the active provider's client — the inactive provider's API
 // key may be absent, and some SDKs validate at construction time.
 const anthropicProvider = env.LLM_PROVIDER === 'anthropic'

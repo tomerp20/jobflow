@@ -6,7 +6,7 @@ const schema = z.object({
   PORT:     z.coerce.number().default(3001),
   LOG_LEVEL: z.enum(['silent','error','warn','info','http','verbose','debug','silly']).default('info'),
 
-  DATABASE_URL: z.string().url(),
+  DATABASE_URL: z.string().min(1).regex(/^postgres(ql)?:\/\//, 'must be a postgres(ql):// connection string'),
   JWT_SECRET:   z.string().min(32),
 
   CORS_ORIGIN:  z.string().default('http://localhost:5173'),
@@ -26,6 +26,16 @@ const schema = z.object({
 
   for (const k of ['GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REDIRECT_URI','CRON_API_KEY'] as const) {
     if (!v[k]) ctx.addIssue({ code: 'custom', path: [k], message: `${k} is required in production` });
+  }
+
+  for (const [k, defaultVal] of [
+    ['CORS_ORIGIN', 'http://localhost:5173'],
+    ['BACKEND_URL', 'http://localhost:3001'],
+    ['FRONTEND_URL', 'http://localhost:5173'],
+  ] as const) {
+    if (v[k] === defaultVal) {
+      ctx.addIssue({ code: 'custom', path: [k], message: `${k} must be set to a non-localhost value in production` });
+    }
   }
 
   if (v.LLM_PROVIDER === 'google' && !v.GOOGLE_AI_API_KEY) {

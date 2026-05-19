@@ -10,6 +10,9 @@ const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
 const OAUTH_STATE_TTL_S = 10 * 60;
 
 function createOAuthClient() {
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+    throw new AppError('Gmail OAuth is not configured (missing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)', 503, 'ERR_GMAIL_NOT_CONFIGURED');
+  }
   return new google.auth.OAuth2(
     env.GOOGLE_CLIENT_ID,
     env.GOOGLE_CLIENT_SECRET,
