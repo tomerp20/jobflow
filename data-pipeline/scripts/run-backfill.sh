@@ -39,6 +39,8 @@ fi
 
 cd "${REPO_ROOT}"
 
+# Also set after .env source above — .env entries for END_DATE still win.
+# Keep this assignment here (not hoisted) so that ordering invariant holds.
 END_DATE="${END_DATE:-$(date -u -d 'yesterday' +%Y-%m-%d)}"
 
 node data-pipeline/fetcher/fetcher.js --range "${BACKFILL_START_DATE}" "${END_DATE}"

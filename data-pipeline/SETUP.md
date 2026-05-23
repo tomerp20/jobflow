@@ -147,11 +147,19 @@ passed to the Fetcher and Backfill Orchestrator:
 | `BACKFILL_START_DATE` | `$(date -u -d '1 year ago' +%Y-%m-%d)` | Inclusive start of the range. |
 | `END_DATE` | `$(date -u -d 'yesterday' +%Y-%m-%d)` | Inclusive end of the range. |
 
-Both can be overridden in three places (later wins):
+Both can be overridden in three places. All three use the same `${VAR:-default}`
+mechanism — they only differ in persistence:
 
-1. The cron line or operator shell (e.g. `BACKFILL_START_DATE=2026-01-01 ./data-pipeline/scripts/run-backfill.sh`).
-2. The persistent `data-pipeline/.env` file (sourced after the defaults are set).
-3. A one-off invocation that exports the var before calling the script.
+1. **Inline on the cron line** in `/etc/cron.d/jobflow` — persistent across cron
+   invocations, but requires editing the installed cron file (and re-running
+   `bootstrap.sh` if you regenerate from the template).
+2. **`data-pipeline/.env`** — persistent across cron invocations; the
+   recommended place for a long-running custom backfill window.
+3. **Exported in the operator's shell** before a manual invocation — one-off,
+   lost on the next cron fire. Useful for ad-hoc backfills or smoke tests.
+
+`.env` is sourced *after* the script's defaults are assigned, so any value set
+there overwrites the default.
 
 The 1-year default matches the plan's stated yearly-coverage goal. Add a line
 like `BACKFILL_START_DATE=2024-01-01` to `data-pipeline/.env` for a persistent
