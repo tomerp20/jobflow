@@ -20,7 +20,12 @@ if [ -f "${DATA_PIPELINE_ROOT}/.env" ]; then
   set +a
 fi
 
-# Disk-space guard.
+# Mount + disk-space guard. Checking the mountpoint first surfaces "/mnt/hdd missing" as a real cause
+# rather than letting df fall back to the root filesystem and silently mislead the threshold check.
+if ! mountpoint -q "${HDD_MOUNT}"; then
+  printf 'FATAL: %s is not a mount point — see data-pipeline/SETUP.md\n' "${HDD_MOUNT}" >&2
+  exit 1
+fi
 AVAILABLE_GB_HDD="$(df --output=avail -BG "${HDD_MOUNT}" | tail -1 | tr -dc '0-9')"
 if [ "${AVAILABLE_GB_HDD:-0}" -lt "${MIN_FREE_GB}" ]; then
   printf 'FATAL: less than %s GB free on %s (have %s GB)\n' "${MIN_FREE_GB}" "${HDD_MOUNT}" "${AVAILABLE_GB_HDD:-0}" >&2

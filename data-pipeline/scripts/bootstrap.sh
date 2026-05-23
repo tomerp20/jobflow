@@ -47,6 +47,8 @@ mountpoint -q "${HDD_MOUNT}" || fail "${HDD_MOUNT} is not a mount point. See dat
 log "Step 3: creating runtime directories"
 mkdir -p "${GHARCHIVE_DIR}"
 mkdir -p "${LOG_DIR}"
+# Keep logs private to the operator; Node binaries log Cassandra context at LOG_LEVEL=info.
+chmod 700 "${LOG_DIR}"
 
 # ── 4. Cassandra container ───────────────────────────────────────────────────
 log "Step 4: bringing up Cassandra via docker compose"
@@ -74,13 +76,18 @@ log "  Cassandra is reachable"
 
 # ── 5. Schema migrations ─────────────────────────────────────────────────────
 log "Step 5: applying schema migrations in numeric order"
-for schema_file in $(find "${SCHEMA_DIR}" -maxdepth 1 -name '*.cql' | sort); do
+# mapfile (not `for f in $(find ...)`) keeps word-splitting safe even with quirky filenames.
+mapfile -t schema_files < <(find "${SCHEMA_DIR}" -maxdepth 1 -name '*.cql' | sort)
+for schema_file in "${schema_files[@]}"; do
   schema_name="$(basename "${schema_file}")"
   log "  applying ${schema_name}"
   # ALTER TABLE ADD raises InvalidRequest("conflicts with an existing column") when re-run.
-  # Tolerate that specific case to keep bootstrap idempotent; abort on anything else.
+  # Treat as benign only when *every* error-bearing line matches a known-idempotent pattern.
+  # Without that "every line" check, a real failure mixed into a multi-statement file would be masked.
   if ! out="$(cqlsh -f "${schema_file}" 2>&1)"; then
-    if printf '%s' "${out}" | grep -Eq 'conflicts with an existing column|already exists'; then
+    error_lines="$(printf '%s' "${out}" | grep -E 'InvalidRequest|Error|Exception' || true)"
+    non_benign="$(printf '%s' "${error_lines}" | grep -vE 'conflicts with an existing column|already exists' || true)"
+    if [ -n "${error_lines}" ] && [ -z "${non_benign}" ]; then
       log "    (already applied, skipping)"
     else
       printf '%s\n' "${out}" >&2
@@ -95,9 +102,13 @@ log "Step 6: installing cron file to ${CRON_DEST}"
 
 TMP_CRON="$(mktemp -t jobflow.cron.XXXXXX)"
 trap 'rm -f "${TMP_CRON}"' EXIT
-# Use | as sed delimiter — JOBFLOW_ROOT contains slashes.
+# Resolve node's directory so the cron PATH points at the actual node install (e.g. nvm) rather than guessing.
+NODE_BIN_DIR="$(dirname "$(command -v node)")"
+# Use | as sed delimiter — JOBFLOW_ROOT, HOME, and NODE_BIN_DIR contain slashes.
 sed -e "s|@JOBFLOW_ROOT@|${REPO_ROOT}|g" \
     -e "s|@USER@|${OPERATOR_USER}|g" \
+    -e "s|@HOME@|${HOME}|g" \
+    -e "s|@NODE_BIN_DIR@|${NODE_BIN_DIR}|g" \
     "${CRON_TEMPLATE}" > "${TMP_CRON}"
 
 sudo cp "${TMP_CRON}" "${CRON_DEST}"

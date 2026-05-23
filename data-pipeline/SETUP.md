@@ -29,6 +29,12 @@ schema migrations).
 - **Creating the Operator user account.** Bootstrap runs as whoever invokes it.
 - **Log rotation, monitoring, alerting.** Out of scope for v1.
 
+> **Single-tenant assumption.** The locks live in world-writable `/var/lock/`. The
+> design assumes one operator user on the box. If you ever add another local user,
+> they could pre-create `/var/lock/jobflow-{backfill,hourly}.lock` and starve the
+> pipeline (it would skip silently). Move locks to a private path (e.g.
+> `/run/lock/<user>/`) if you violate this assumption.
+
 ---
 
 ## Step 1 — Manual prerequisites (one-time, per box)
@@ -81,10 +87,17 @@ docker compose version    # confirms the plugin is installed
 Used by `bootstrap.sh` to wait for Cassandra and apply schema migrations.
 
 ```bash
-sudo apt-get install -y python3-pip
-pip3 install cqlsh
+# Recent Ubuntu (22.04+) marks the system Python as PEP 668 "externally managed",
+# which makes a plain `pip3 install cqlsh` fail. Use pipx for an isolated install:
+sudo apt-get install -y pipx
+pipx ensurepath          # adds ~/.local/bin to PATH (re-login or `source ~/.profile` after)
+pipx install cqlsh
 cqlsh --version
 ```
+
+> If you prefer not to use `pipx`, the Cassandra Debian repo ships `cqlsh` inside the
+> `cassandra-tools` package — but installing that pulls in the Cassandra server too.
+> `pipx` is the minimal-footprint option.
 
 ### 1.5 Clone the repo
 
