@@ -1,0 +1,19 @@
+{
+  "name": "orchestrators",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Pipeline orchestrators (hourly and backfill)",
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "scripts": {
+    "hourly": "node --env-file=.env hourly.js"
+  },
+  "dependencies": {
+    "cassandra-driver": "^4.7.2",
+    "pino": "^9.0.0"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13.0.0"
+  }
+}
