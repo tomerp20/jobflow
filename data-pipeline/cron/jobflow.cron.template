@@ -1,0 +1,19 @@
+# JobFlow data-pipeline cron schedule.
+#
+# Installed at /etc/cron.d/jobflow by data-pipeline/scripts/bootstrap.sh.
+# Placeholders @JOBFLOW_ROOT@ and @USER@ are substituted at install time.
+#
+# Lock coordination (docs/InjestionPlan.md §6.1):
+#   • Backfill holds /var/lock/jobflow-backfill.lock for the whole run.
+#   • Hourly takes its own lock AND checks the backfill lock; if backfill is
+#     running, the hourly skips this interval (logged to hourly-skips.log).
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+HOME=/home/@USER@
+
+# Backfill — nightly at 00:00. flock -n means stacked backfills skip silently.
+0 0 * * * @USER@ flock -n /var/lock/jobflow-backfill.lock @JOBFLOW_ROOT@/data-pipeline/scripts/run-backfill.sh >> /home/@USER@/jobflow-logs/backfill.log 2>&1
+
+# Hourly — every hour at :15. Nested flock: outer = own lock, inner = check backfill lock without holding it.
+15 * * * * @USER@ flock -n /var/lock/jobflow-hourly.lock -c 'flock -n /var/lock/jobflow-backfill.lock true && @JOBFLOW_ROOT@/data-pipeline/scripts/run-hourly.sh || echo "$(date -u +\%Y-\%m-\%dT\%H:\%M:\%SZ) skipping: backfill in progress" >> /home/@USER@/jobflow-logs/hourly-skips.log' >> /home/@USER@/jobflow-logs/hourly.log 2>&1
