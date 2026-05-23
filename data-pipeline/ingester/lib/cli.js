@@ -73,6 +73,9 @@ export function parseCLI(argv) {
   }
 
   if (flags.catchup) {
+    if (flags.mode === 'backfill') {
+      die('--catchup --mode backfill is not supported; the Backfill Orchestrator uses --range, not --catchup');
+    }
     return { verb: 'catchup', mode: flags.mode ?? 'hourly', targetCompanies };
   }
 

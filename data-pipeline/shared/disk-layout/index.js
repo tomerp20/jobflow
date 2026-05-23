@@ -36,6 +36,13 @@ export function enumerateRange(startDate, endDate) {
   return hours;
 }
 
+// Returns all hour IDs (YYYY-MM-DD-H) found under rootDir, sorted chronologically.
+export function enumerateAllOnDisk(rootDir) {
+  const ids = [];
+  _collectHourIds(rootDir, rootDir, ids);
+  return ids.sort((a, b) => hourIdToMs(a) - hourIdToMs(b));
+}
+
 // Returns the most recent hour ID (YYYY-MM-DD-H) found under rootDir, or null if empty.
 export function latestOnDisk(rootDir) {
   const ids = [];
