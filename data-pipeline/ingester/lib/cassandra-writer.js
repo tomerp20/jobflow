@@ -1,7 +1,7 @@
 import cassandra from 'cassandra-driver';
 import pLimit from 'p-limit';
 
-const { Client, types, errors, policies } = cassandra;
+const { Client, types, errors } = cassandra;
 
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [100, 500, 2000];
@@ -28,9 +28,6 @@ export class CassandraWriter {
       contactPoints,
       localDataCenter: localDc,
       keyspace,
-      policies: {
-        retry: new policies.retry.DefaultRetryPolicy(),
-      },
       queryOptions: {
         consistency: types.consistencies.localOne,
         prepare: true,
@@ -40,10 +37,10 @@ export class CassandraWriter {
     this._logger = logger;
     this._writeConcurrency = writeConcurrency;
     this._limit = null;
-    this._insertStmt = null;
-    this._processedFilesInsertStmt = null;
-    this._processedFilesSelectStmt = null;
-    this._backfillProgressInsertStmt = null;
+    this._insertCql = null;
+    this._processedFilesInsertCql = null;
+    this._processedFilesSelectCql = null;
+    this._backfillProgressInsertCql = null;
 
     // Partition write rate tracking
     this._partitionWindow = new Map();
@@ -55,22 +52,18 @@ export class CassandraWriter {
 
   async connect() {
     await this._client.connect();
-    this._insertStmt = await this._client.prepare(
+    this._insertCql =
       `INSERT INTO ${this._keyspace}.company_events
          (company, org_name, year_month, event_time, event_id, event_type, repo_name, actor_login, is_ai, tech_tags)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    this._processedFilesSelectStmt = await this._client.prepare(
-      `SELECT file_name FROM ${this._keyspace}.processed_files WHERE file_name = ?`
-    );
-    this._processedFilesInsertStmt = await this._client.prepare(
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    this._processedFilesSelectCql =
+      `SELECT file_name FROM ${this._keyspace}.processed_files WHERE file_name = ?`;
+    this._processedFilesInsertCql =
       `INSERT INTO ${this._keyspace}.processed_files (file_name, processed_at, event_count, filtered_count)
-       VALUES (?, ?, ?, ?)`
-    );
-    this._backfillProgressInsertStmt = await this._client.prepare(
+       VALUES (?, ?, ?, ?)`;
+    this._backfillProgressInsertCql =
       `INSERT INTO ${this._keyspace}.backfill_progress (run_id, date, status, completed_at, events_written)
-       VALUES (?, ?, ?, ?, ?)`
-    );
+       VALUES (?, ?, ?, ?, ?)`;
     this._limit = pLimit(this._writeConcurrency);
   }
 
@@ -95,7 +88,7 @@ export class CassandraWriter {
   }
 
   async isFileProcessed(fileName) {
-    const result = await this._client.execute(this._processedFilesSelectStmt, [fileName], { prepare: true });
+    const result = await this._client.execute(this._processedFilesSelectCql, [fileName], { prepare: true });
     return result.rowLength > 0;
   }
 
@@ -144,7 +137,7 @@ export class CassandraWriter {
 
   async _flushBatch(partitionKey, rows) {
     const queries = rows.map(event => ({
-      query: this._insertStmt,
+      query: this._insertCql,
       params: [
         event.company,
         event.org_name,
@@ -179,7 +172,7 @@ export class CassandraWriter {
 
   async writeBackfillProgress(runId, date, eventsWritten) {
     await this._client.execute(
-      this._backfillProgressInsertStmt,
+      this._backfillProgressInsertCql,
       [runId, types.LocalDate.fromString(date), 'completed', new Date(), eventsWritten],
       { prepare: true }
     );
@@ -201,7 +194,7 @@ export class CassandraWriter {
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
-        await this._client.execute(this._insertStmt, params, { prepare: true });
+        await this._client.execute(this._insertCql, params, { prepare: true });
         return;
       } catch (err) {
         // Fail fast on non-transient errors (syntax error, invalid query, etc.)
@@ -217,7 +210,7 @@ export class CassandraWriter {
 
   async markFileProcessed(fileName, eventCount, filteredCount) {
     await this._client.execute(
-      this._processedFilesInsertStmt,
+      this._processedFilesInsertCql,
       [fileName, new Date(), eventCount, filteredCount],
       { prepare: true }
     );
