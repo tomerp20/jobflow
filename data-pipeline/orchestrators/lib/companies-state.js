@@ -4,3 +4,10 @@ export async function readInitialised(client) {
   );
   return result.rows.map(r => ({ company: r.company, org_name: r.org_name }));
 }
+
+export async function readUninitialised(client) {
+  const result = await client.execute(
+    'SELECT company, org_name FROM companies WHERE initialized = false AND active = true ALLOW FILTERING'
+  );
+  return result.rows.map(r => ({ company: r.company, org_name: r.org_name }));
+}

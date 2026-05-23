@@ -7,10 +7,12 @@
     "node": ">=20.6.0"
   },
   "scripts": {
-    "hourly": "node --env-file=.env hourly.js"
+    "hourly": "node --env-file=.env hourly.js",
+    "backfill": "node --env-file=.env backfill.js"
   },
   "dependencies": {
     "cassandra-driver": "^4.7.2",
+    "disk-layout": "file:../shared/disk-layout",
     "pino": "^9.0.0"
   },
   "devDependencies": {
