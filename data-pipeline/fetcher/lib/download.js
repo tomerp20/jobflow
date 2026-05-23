@@ -2,7 +2,7 @@ import { createWriteStream, existsSync, mkdirSync, renameSync, unlinkSync } from
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 import path from 'path';
-import { hourIdToPath } from './disk-layout.js';
+import { hourIdToPath } from '../../shared/disk-layout/index.js';
 
 const GH_ARCHIVE_BASE = 'https://data.gharchive.org';
 const MAX_ATTEMPTS = 4;
