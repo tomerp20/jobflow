@@ -79,19 +79,16 @@ if (cmd.verb === 'hour') {
   hourIds = [cmd.hourId];
 } else if (cmd.verb === 'range') {
   hourIds = enumerateRange(cmd.start, cmd.end);
-} else {
+} else if (cmd.verb === 'catchup') {
   // catchup: walk disk, skip files already recorded in processed_files
   const allOnDisk = enumerateAllOnDisk(GHARCHIVE_DIR);
   if (allOnDisk.length === 0) {
-    logger.info('no files in GHARCHIVE_DIR');
+    logger.warn('no files in GHARCHIVE_DIR');
     await writer.shutdown();
     process.exit(0);
   }
-  const pending = [];
-  for (const id of allOnDisk) {
-    const done = await writer.isFileProcessed(id);
-    if (!done) pending.push(id);
-  }
+  const processedFlags = await Promise.all(allOnDisk.map(id => writer.isFileProcessed(id)));
+  const pending = allOnDisk.filter((_, i) => !processedFlags[i]);
   const alreadyProcessed = allOnDisk.length - pending.length;
   logger.info(
     { total: allOnDisk.length, alreadyProcessed, toProcess: pending.length },
@@ -103,6 +100,8 @@ if (cmd.verb === 'hour') {
     process.exit(0);
   }
   hourIds = pending;
+} else {
+  throw new Error(`unknown verb: ${cmd.verb}`);
 }
 
 // ── Process each hour file ────────────────────────────────────────────────────
