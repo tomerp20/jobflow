@@ -37,12 +37,24 @@ An email sent by a company to acknowledge that they received a job application. 
 _Avoid_: Application confirmation, Acknowledgement email, Receipt email
 
 **Company Scout**:
-An automated process that runs on a Company's First Sighting. It resolves the Company to a public GitHub organization and classifies whether that organization has an Active GitHub Presence. Its result feeds the separate JobFlow Analytics system; it produces no Notification and no user-facing change. A sibling of the Email Agent — an automated process acting on Applications — but triggered by Company novelty rather than by email.
+An automated process that runs on a Company's First Sighting. It resolves the Company to every public GitHub organization that belongs to it (a Company may legitimately own multiple Orgs — e.g. `wix`, `wix-incubator`) and classifies whether the Company has an Active GitHub Presence. It writes the resolved Orgs to the JobFlow Analytics system's `companies` table (one row per Company–Org pair); it produces no Notification and no user-facing change. A sibling of the Email Agent — an automated process acting on Applications — but triggered by Company novelty rather than by email.
 _Avoid_: Company Profiler, GitHub Checker, Company Agent
 
 **Active GitHub Presence**:
-The classification the Company Scout assigns to a Company: its resolved GitHub organization has at least one public repository that is not a fork, not archived, and was pushed to within the last year. A Company with no resolvable organization, or whose repositories are all older, does not have an Active GitHub Presence.
+The classification the Company Scout assigns to a Company: at least one of the Company's resolved GitHub organizations has at least one public repository that is not a fork, not archived, and was pushed to within the last year. A Company with no resolvable organizations, or whose repositories across all resolved Orgs are all older, forks, or archived, does not have an Active GitHub Presence.
 _Avoid_: Active repos, Live org
+
+**Org**:
+A GitHub organization that the Company Scout has resolved as belonging to a specific Company. Stored in the JobFlow Analytics `companies` Cassandra table as one row per (Company, Org) pair — a single Company may legitimately own multiple Orgs (e.g. `wix`, `wix-incubator`). The pipeline always refers to "Org" in this sense; the existing JobFlow web app reserves "organization" / "org" for the same concept (see Company entry).
+_Avoid_: GitHub account, Profile, Owner
+
+**Backfill**:
+The process that brings every uninitialised (Company, Org) row in the `companies` table up to date with the full local archive of GH Archive files. Runs at most once per night under a cron lock that excludes the Hourly Ingest. A (Company, Org) row stays `initialized = false` until a Backfill Run completes against it; once flipped, the Hourly Ingest takes over for that row.
+_Avoid_: Initial load, Catchup (Catchup is the Hourly Ingest's fetcher mode)
+
+**Backfill Run**:
+One execution of the Backfill process, identified by a `timeuuid` `run_id`. At start, the Run locks the set of (Company, Org) pairs currently marked `initialized = false`; any (Company, Org) pair added after the Run starts is ignored by that Run and waits for the next night's Run. A Run progresses one Date at a time and records per-Date status in the `backfill_progress` table; the Run itself is recorded in `backfill_runs` with status `in_progress`, `completed`, or `failed`.
+_Avoid_: Job, Batch, Sweep
 
 **Activity**:
 A row in `card_activities` representing either a system-recorded event (action = `created`, `updated`, or `moved`) or a user-authored Note (action = `note_added`). System Activities are created automatically when an Application is created, a field changes, or the Application moves to a new Stage.
