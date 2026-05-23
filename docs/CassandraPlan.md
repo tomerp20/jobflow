@@ -147,11 +147,13 @@ CREATE TABLE jobflow.processed_files (
 );
 ```
 
+The `file_name` column stores the canonical hour ID `YYYY-MM-DD-H` (hour unpadded — `2025-05-01-15`, not `15.json.gz` or a full filesystem path). This matches GH Archive's URL convention and decouples the table from the on-disk layout. `event_count` is the total number of events parsed from the file; `filtered_count` is the subset that survived company-filtering and was written to `company_events`. Row existence implies successful processing — there is no status column.
+
 The ingestion script checks this table before processing each file. Re-running the pipeline on already-processed files becomes a no-op. Without this, re-runs during development produce duplicate rows in `company_events` (harmless thanks to the schema, but pollutes counts and wastes time).
 
 ### 4.4 Table: `companies`
 
-Maps human-readable company names to one or more GitHub org names. This is the fix for the `TARGET_COMPANIES` issue — companies don't always equal their org slug.
+Holds the Company → Org mapping produced by the Company Scout. The Scout writes one row per (Company, Org) pair — a single Company may legitimately own multiple Orgs (e.g. Wix → `wix`, `wix-incubator`), so the table is keyed on a composite primary key. The ingestion pipeline reads this table to know which Orgs to filter for. PR1 of the ingestion subsystem adds `initialized boolean` and `initialized_at timestamp` columns — flipped to `true` per row by the Backfill once that (Company, Org) row's events are fully ingested. The Hourly Ingest filters on `initialized = true`; the Backfill filters on `initialized = false`.
 
 ```sql
 CREATE TABLE jobflow.companies (
@@ -159,23 +161,20 @@ CREATE TABLE jobflow.companies (
     org_name        text,
     added_at        timestamp,
     active          boolean,
+    initialized     boolean,         -- added in PR1; true once Backfill has run for this row
+    initialized_at  timestamp,       -- added in PR1; when initialized flipped to true
     PRIMARY KEY ((company), org_name)
 );
 ```
 
-Seeded manually:
+Rows are written by the Company Scout when a Company is first sighted in the JobFlow web app — one INSERT per resolved Org, each with `initialized = false`. Example written by the Scout for a newly sighted Wix:
 
 ```sql
-INSERT INTO jobflow.companies (company, org_name, added_at, active) VALUES ('wix', 'wix', toTimestamp(now()), true);
-INSERT INTO jobflow.companies (company, org_name, added_at, active) VALUES ('wix', 'wix-incubator', toTimestamp(now()), true);
-INSERT INTO jobflow.companies (company, org_name, added_at, active) VALUES ('wix', 'wix-private', toTimestamp(now()), false);
--- (wix-private will produce zero rows since private repos don't appear in GH Archive,
---  but documenting the mapping is correct)
-INSERT INTO jobflow.companies (company, org_name, added_at, active) VALUES ('honeybook', 'honeybook', toTimestamp(now()), true);
--- ...
+INSERT INTO jobflow.companies (company, org_name, added_at, active, initialized) VALUES ('wix', 'wix', toTimestamp(now()), true, false);
+INSERT INTO jobflow.companies (company, org_name, added_at, active, initialized) VALUES ('wix', 'wix-incubator', toTimestamp(now()), true, false);
 ```
 
-The ingestion script loads this map at startup into an in-memory `Map<org, company>` for O(1) filtering. New companies are added by inserting rows and restarting the ingester.
+The ingestion script loads this map at startup into an in-memory `Map<org, company>` for O(1) filtering, filtered by the row's `initialized` flag depending on whether it is running in Hourly Ingest or Backfill mode. The Hourly Ingest picks up a (Company, Org) row only after the Backfill has flipped its `initialized` flag to `true`.
 
 ### 4.5 Read-side queries (for reference)
 
