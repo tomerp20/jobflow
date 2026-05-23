@@ -11,7 +11,12 @@ export async function findLatestRun(client, keyspace) {
   );
   if (result.rowLength === 0) return null;
   const row = result.rows[0];
-  const targetRows = (row.target_rows || []).map(t => ({
+  // Guard against a row with a missing/empty target_rows column. Without this,
+  // the resume path would spawn the Ingester with `--target-companies ""`.
+  if (!row.target_rows || row.target_rows.length === 0) {
+    throw new Error(`backfill_runs row ${row.run_id} has no target_rows — cannot resume`);
+  }
+  const targetRows = row.target_rows.map(t => ({
     company: t.get(0),
     org_name: t.get(1),
   }));
@@ -31,17 +36,21 @@ export async function createNewRun(client, keyspace, uninitialised) {
 
 export async function markCompleted(client, keyspace, runId, targetRows) {
   const now = new Date();
-  const queries = [
-    ...targetRows.map(r => ({
-      query: `UPDATE ${keyspace}.companies SET initialized = true, initialized_at = ? WHERE company = ? AND org_name = ?`,
-      params: [now, r.company, r.org_name],
-    })),
-    {
-      query: `UPDATE ${keyspace}.backfill_runs SET status = 'completed', completed_at = ? WHERE bucket = ? AND run_id = ?`,
-      params: [now, BUCKET, runId],
-    },
-  ];
-  await client.batch(queries, { logged: true, prepare: true });
+  // The per-company UPDATEs are idempotent (initialized=true is a fixed value),
+  // so they are issued individually rather than in a multi-partition LOGGED
+  // BATCH — the coordinator pressure and batch-size limit make a single LOGGED
+  // BATCH across many partitions an anti-pattern. If any company UPDATE fails
+  // here, the backfill_runs row stays in_progress; the resume-path short-circuit
+  // on the next nightly run will retry markCompleted (also idempotent).
+  const companyUpdate = `UPDATE ${keyspace}.companies SET initialized = true, initialized_at = ? WHERE company = ? AND org_name = ?`;
+  for (const r of targetRows) {
+    await client.execute(companyUpdate, [now, r.company, r.org_name], { prepare: true });
+  }
+  await client.execute(
+    `UPDATE ${keyspace}.backfill_runs SET status = 'completed', completed_at = ? WHERE bucket = ? AND run_id = ?`,
+    [now, BUCKET, runId],
+    { prepare: true }
+  );
 }
 
 export async function markFailed(client, keyspace, runId) {

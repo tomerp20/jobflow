@@ -58,7 +58,8 @@ async function main() {
     await client.execute('SELECT release_version FROM system.local');
     logger.info('cassandra connected');
   } catch (err) {
-    logger.fatal({ err: err.message }, 'cassandra connection failed');
+    logger.fatal({ err }, 'cassandra connection failed');
+    await client.shutdown().catch(() => {});
     process.exit(1);
   }
 
@@ -86,12 +87,15 @@ async function main() {
       if (maxDate !== null) {
         startDate = nextDay(maxDate);
       } else {
-        // In-progress run with no completed dates — restart from earliest on disk
+        // In-progress run with no completed dates — restart from earliest on disk.
+        // Safe to re-ingest: the Ingester writes (run_id, date)-keyed rows and
+        // PR3.A's idempotency contract guarantees that repeated writes under the
+        // same key produce the same end state.
         try {
           startDate = earliestOnDisk(GHARCHIVE_DIR);
         } catch (err) {
-          logger.fatal({ err: err.message }, 'cannot determine start date for resume');
-          await client.shutdown();
+          logger.fatal({ err }, 'cannot determine start date for resume');
+          await client.shutdown().catch(() => {});
           process.exit(1);
         }
       }
@@ -103,8 +107,8 @@ async function main() {
       try {
         earliest = earliestOnDisk(GHARCHIVE_DIR);
       } catch (err) {
-        logger.fatal({ err: err.message }, 'cannot determine start date for fresh run');
-        await client.shutdown();
+        logger.fatal({ err }, 'cannot determine start date for fresh run');
+        await client.shutdown().catch(() => {});
         process.exit(1);
       }
 
@@ -143,6 +147,11 @@ async function main() {
 
     // ── Handle Ingester exit ──────────────────────────────────────────────────
     if (exitCode === 0) {
+      // If markCompleted throws here the backfill_runs row stays in_progress,
+      // even though every hour has been ingested. That is recoverable: the next
+      // nightly run will enter the resume path, find startDate > yesterday at
+      // the "all dates already processed" short-circuit above, and retry
+      // markCompleted. The companies UPDATEs are idempotent, so this is safe.
       await markCompleted(client, CASSANDRA_KEYSPACE, runId, targetRows);
       logger.info({ runId: runId.toString() }, 'backfill complete — companies initialised');
     } else {
@@ -152,7 +161,7 @@ async function main() {
       process.exit(exitCode);
     }
   } catch (err) {
-    logger.fatal({ err: err.message }, 'backfill orchestrator error');
+    logger.fatal({ err }, 'backfill orchestrator error');
     await client.shutdown().catch(() => {});
     process.exit(1);
   }
