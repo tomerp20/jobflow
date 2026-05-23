@@ -118,11 +118,12 @@ CREATE TABLE jobflow.company_events (
     year_month     text,        -- partition bucket, e.g. '2026-05'
     event_time     timestamp,
     event_id       text,        -- GitHub's event UUID
-    event_type     text,        -- 'PushEvent' | 'PullRequestReviewCommentEvent' | ...
-    repo_name      text,
+    event_type     text,        -- 'PushEvent' | 'PullRequestEvent' | 'IssuesEvent' | 'ReleaseEvent'
+    repo_name      text,        -- the GitHub 'org/repo' form
+    org_name       text,        -- added by PR2; the Org component of repo_name, denormalised for queryability
     actor_login    text,
-    is_ai          boolean,     -- bot or AI-tool authored
-    tech_tags      set<text>,   -- extracted from commit messages
+    is_ai          boolean,     -- bot or AI-tool authored, per the Ingester's heuristic
+    tech_tags      set<text>,   -- extracted by per-event-type regexes
     PRIMARY KEY ((company, year_month), event_time, event_id)
 ) WITH CLUSTERING ORDER BY (event_time DESC, event_id ASC);
 ```
@@ -131,8 +132,10 @@ CREATE TABLE jobflow.company_events (
 
 - **Composite partition key `(company, year_month)`** bounds partition size. A single active company over a single month is well under the 100 MB / 100k row Cassandra soft limit. Without time-bucketing, a Wix partition grows unbounded and eventually destroys read latency.
 - **`event_id` in the clustering key** prevents silent overwrites when two events share a second-resolution timestamp. This is the most common Cassandra modeling mistake and silently drops 1–5% of rows.
+- **`org_name` as a denormalised column** (added by PR2) lets readers split a Company's activity by Org without re-parsing `repo_name` on every row. Wix's `wix` vs `wix-incubator` events become directly groupable. Cost is ~12 bytes per row; the table doesn't even notice.
 - **`is_ai` as a boolean column** replaces the original counter table. Idempotent: re-ingesting the same event twice produces an UPSERT with identical contents, not a doubled count. Aggregation happens at read time.
 - **`tech_tags` as a set** rather than a join table — leverages C*'s collection type, no JOIN needed.
+- The set of `event_type` values is curated for analytical value (see ADR 0003 and `docs/InjestionPlan.md` §5). The string column itself can hold any future value if the curated set is expanded.
 
 ### 4.3 Table: `processed_files`
 
