@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "cassandra-driver": "^4.7.2",
-    "disk-layout": "file:../shared/disk-layout",
     "pino": "^9.0.0"
   },
   "devDependencies": {

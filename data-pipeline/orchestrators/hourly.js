@@ -32,39 +32,46 @@ if (!CASSANDRA_LOCAL_DC) {
   process.exit(1);
 }
 
-// ── Connect to Cassandra ──────────────────────────────────────────────────────
-const client = new Client({
-  contactPoints: CASSANDRA_CONTACT_POINTS,
-  localDataCenter: CASSANDRA_LOCAL_DC,
-  keyspace: CASSANDRA_KEYSPACE,
-});
+async function main() {
+  // ── Connect to Cassandra ────────────────────────────────────────────────────
+  const client = new Client({
+    contactPoints: CASSANDRA_CONTACT_POINTS,
+    localDataCenter: CASSANDRA_LOCAL_DC,
+    keyspace: CASSANDRA_KEYSPACE,
+  });
 
-try {
-  await client.connect();
-  await client.execute('SELECT release_version FROM system.local');
-  logger.info('cassandra connected');
-} catch (err) {
-  logger.fatal({ err: err.message }, 'cassandra connection failed');
+  try {
+    await client.connect();
+    await client.execute('SELECT release_version FROM system.local');
+    logger.info('cassandra connected');
+  } catch (err) {
+    logger.fatal({ err: err.message }, 'cassandra connection failed');
+    process.exit(1);
+  }
+
+  // ── Read companies ──────────────────────────────────────────────────────────
+  const companies = await readInitialised(client);
+  await client.shutdown().catch(err => logger.warn({ err }, 'cassandra shutdown error'));
+
+  if (companies.length === 0) {
+    logger.info('no initialised companies');
+    process.exit(0);
+  }
+
+  const targetCompanies = companies.map(r => `${r.company}:${r.org_name}`).join(',');
+  logger.info({ count: companies.length, targetCompanies }, 'companies loaded — spawning ingester');
+
+  // ── Spawn ingester ──────────────────────────────────────────────────────────
+  const ingesterPath = path.resolve(__dirname, '..', 'ingester', 'ingester.js');
+  const exitCode = await spawnIngester(
+    [ingesterPath, '--catchup', '--mode', 'hourly', '--target-companies', targetCompanies],
+    logger
+  );
+
+  process.exit(exitCode);
+}
+
+main().catch((err) => {
+  logger.fatal({ err }, 'hourly orchestrator failed');
   process.exit(1);
-}
-
-// ── Read companies ────────────────────────────────────────────────────────────
-const companies = await readInitialised(client);
-await client.shutdown();
-
-if (companies.length === 0) {
-  logger.info('no initialised companies');
-  process.exit(0);
-}
-
-const targetCompanies = companies.map(r => `${r.company}:${r.org_name}`).join(',');
-logger.info({ count: companies.length, targetCompanies }, 'companies loaded — spawning ingester');
-
-// ── Spawn ingester ────────────────────────────────────────────────────────────
-const ingesterPath = path.resolve(__dirname, '..', 'ingester', 'ingester.js');
-const exitCode = await spawnIngester(
-  [ingesterPath, '--catchup', '--mode', 'hourly', '--target-companies', targetCompanies],
-  logger
-);
-
-process.exit(exitCode);
+});
