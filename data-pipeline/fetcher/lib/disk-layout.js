@@ -36,6 +36,36 @@ export function enumerateRange(startDate, endDate) {
   return hours;
 }
 
+// Returns the most recent hour ID (YYYY-MM-DD-H) found under rootDir, or null if empty.
+export function latestOnDisk(rootDir) {
+  const ids = [];
+  _collectHourIds(rootDir, rootDir, ids);
+  if (ids.length === 0) return null;
+  return ids.reduce((best, cur) => _hourIdToMs(cur) > _hourIdToMs(best) ? cur : best);
+}
+
+function _collectHourIds(root, dir, ids) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      _collectHourIds(root, full, ids);
+    } else if (entry.name.endsWith('.json.gz')) {
+      ids.push(pathToHourId(root, full));
+    }
+  }
+}
+
+function _hourIdToMs(hourId) {
+  const [y, m, d, h] = hourId.split('-').map(Number);
+  return Date.UTC(y, m - 1, d, h);
+}
+
 // Recursively removes every *.partial file under root. Silently skips missing directories.
 export function cleanPartials(root) {
   _sweepDir(root);
