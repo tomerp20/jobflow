@@ -27,9 +27,23 @@ function parseTargetCompanies(raw) {
   return pairs.map(pair => {
     const colon = pair.indexOf(':');
     if (colon === -1) die(`invalid --target-companies entry "${pair}" — expected company:org format`);
-    const company = pair.slice(0, colon).trim();
-    const org = pair.slice(colon + 1).trim();
-    if (!company || !org) die(`invalid --target-companies entry "${pair}" — company and org must be non-empty`);
+    const rawCompany = pair.slice(0, colon).trim();
+    const rawOrg = pair.slice(colon + 1).trim();
+    if (!rawCompany || !rawOrg) die(`invalid --target-companies entry "${pair}" — company and org must be non-empty`);
+    // Components are URL-encoded by the Backfill Orchestrator so values
+    // containing ':' or ',' survive the wire format. Decode each side
+    // separately so the operator knows which component was malformed.
+    let company, org;
+    try {
+      company = decodeURIComponent(rawCompany);
+    } catch {
+      die(`invalid --target-companies entry "${pair}" — malformed URL encoding in company component`);
+    }
+    try {
+      org = decodeURIComponent(rawOrg);
+    } catch {
+      die(`invalid --target-companies entry "${pair}" — malformed URL encoding in org component`);
+    }
     return { company, org };
   });
 }

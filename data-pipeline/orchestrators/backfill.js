@@ -153,7 +153,11 @@ async function main() {
     }
 
     // ── Spawn Ingester ────────────────────────────────────────────────────────
-    const targetCompaniesArg = targetRows.map(r => `${r.company}:${r.org_name}`).join(',');
+    // URL-encode each token so values containing ':' or ',' can't break the
+    // company:org,company:org wire format the Ingester parses.
+    const targetCompaniesArg = targetRows
+      .map(r => `${encodeURIComponent(r.company)}:${encodeURIComponent(r.org_name)}`)
+      .join(',');
     const ingesterPath = path.resolve(__dirname, '..', 'ingester', 'ingester.js');
 
     logger.info({ startDate, endDate, companies: targetRows.length }, 'spawning ingester');
