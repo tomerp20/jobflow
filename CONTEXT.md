@@ -56,6 +56,14 @@ _Avoid_: Initial load, Catchup (Catchup is the Hourly Ingest's fetcher mode)
 One execution of the Backfill process, identified by a `timeuuid` `run_id`. At start, the Run locks the set of (Company, Org) pairs currently marked `initialized = false`; any (Company, Org) pair added after the Run starts is ignored by that Run and waits for the next night's Run. A Run progresses one Date at a time and records per-Date status in the `backfill_progress` table; the Run itself is recorded in `backfill_runs` with status `in_progress`, `completed`, or `failed`.
 _Avoid_: Job, Batch, Sweep
 
+**Hourly Ingest**:
+The frequent, low-latency counterpart to the Backfill. Targets only (Company, Org) rows that have already been initialised by a prior Backfill Run, and incorporates each new GH Archive file as it becomes available. Backfill brings a row up to date once; Hourly Ingest keeps it current thereafter.
+_Avoid_: Live ingest, Streaming ingest
+
+**Tracked Event**:
+A row in the `company_events` Cassandra table — one piece of public activity on a Company's Org repos (a code push, a pull request, an issue, a release) that survived the Ingester's filter. The set of accepted GH Archive event types is curated for analytical value, not exhaustive. Each Tracked Event carries the Company partition it belongs to, the event-time-derived month bucket, extracted Tech Tags, and an AI-attributed flag.
+_Avoid_: Activity (already used for the JobFlow web app's `card_activities` rows), Event log entry
+
 **Activity**:
 A row in `card_activities` representing either a system-recorded event (action = `created`, `updated`, or `moved`) or a user-authored Note (action = `note_added`). System Activities are created automatically when an Application is created, a field changes, or the Application moves to a new Stage.
 _Avoid_: Log entry, History, Event
