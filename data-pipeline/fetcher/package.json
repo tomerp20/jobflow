@@ -1,0 +1,20 @@
+{
+  "name": "jobflow-fetcher",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Downloads GH Archive hourly .json.gz files to a configurable on-disk root",
+  "main": "fetcher.js",
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "scripts": {
+    "start": "node --env-file=.env fetcher.js"
+  },
+  "dependencies": {
+    "p-limit": "^6.0.0",
+    "pino": "^9.0.0"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13.0.0"
+  }
+}
