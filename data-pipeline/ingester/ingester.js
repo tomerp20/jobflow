@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pino from 'pino';
-import { hourIdToPath, enumerateRange, latestOnDisk, hourIdToMs, msToHourId } from 'disk-layout';
+import { hourIdToPath, enumerateRange, enumerateAllOnDisk } from 'disk-layout';
 import { parseCLI } from './lib/cli.js';
 import { CassandraWriter } from './lib/cassandra-writer.js';
 
@@ -79,25 +79,29 @@ if (cmd.verb === 'hour') {
   hourIds = [cmd.hourId];
 } else if (cmd.verb === 'range') {
   hourIds = enumerateRange(cmd.start, cmd.end);
-} else {
-  // catchup
-  const anchor = latestOnDisk(GHARCHIVE_DIR);
-  if (!anchor) {
-    logger.fatal('no anchor on disk — run --hour or --range first to seed the directory');
-    await writer.shutdown();
-    process.exit(1);
-  }
-  const ceilingMs = Date.now() - 2 * 3_600_000;
-  const anchorMs = hourIdToMs(anchor);
-  hourIds = [];
-  for (let t = anchorMs + 3_600_000; t <= ceilingMs; t += 3_600_000) {
-    hourIds.push(msToHourId(t));
-  }
-  if (hourIds.length === 0) {
-    logger.info({ anchor }, 'already up to date');
+} else if (cmd.verb === 'catchup') {
+  // catchup: walk disk, skip files already recorded in processed_files
+  const allOnDisk = enumerateAllOnDisk(GHARCHIVE_DIR);
+  if (allOnDisk.length === 0) {
+    logger.warn('no files in GHARCHIVE_DIR');
     await writer.shutdown();
     process.exit(0);
   }
+  const processedFlags = await Promise.all(allOnDisk.map(id => writer.isFileProcessed(id)));
+  const pending = allOnDisk.filter((_, i) => !processedFlags[i]);
+  const alreadyProcessed = allOnDisk.length - pending.length;
+  logger.info(
+    { total: allOnDisk.length, alreadyProcessed, toProcess: pending.length },
+    'catchup startup summary'
+  );
+  if (pending.length === 0) {
+    logger.info('nothing to do');
+    await writer.shutdown();
+    process.exit(0);
+  }
+  hourIds = pending;
+} else {
+  throw new Error(`unknown verb: ${cmd.verb}`);
 }
 
 // ── Process each hour file ────────────────────────────────────────────────────
