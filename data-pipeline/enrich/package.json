@@ -1,0 +1,13 @@
+{
+  "name": "jobflow-enrich",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "GitHub REST API enrichment job — fills tech_tags from commit file paths",
+  "main": "github-commit-enrich.js",
+  "scripts": {
+    "start": "node github-commit-enrich.js"
+  },
+  "dependencies": {
+    "cassandra-driver": "^4.7.2"
+  }
+}
