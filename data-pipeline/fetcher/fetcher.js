@@ -1,7 +1,7 @@
 import pino from 'pino';
 import pLimit from 'p-limit';
 import { parseCLI } from './lib/cli.js';
-import { cleanPartials, enumerateRange } from './lib/disk-layout.js';
+import { cleanPartials, enumerateRange } from '../shared/disk-layout/index.js';
 import { downloadHour } from './lib/download.js';
 
 const ROOT = process.env.GHARCHIVE_DIR ?? './data/gharchive';
