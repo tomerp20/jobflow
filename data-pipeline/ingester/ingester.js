@@ -107,13 +107,43 @@ if (cmd.verb === 'hour') {
 // ── Process each hour file ────────────────────────────────────────────────────
 let exitCode = 0;
 
-for (const hourId of hourIds) {
-  try {
-    await processHour(hourId);
-  } catch (err) {
-    logger.error({ hourId, err: err.message }, 'failed to process hour — stopping');
-    exitCode = 1;
-    break;
+if (cmd.mode === 'backfill' && cmd.verb === 'range') {
+  // Group hourIds by date for per-date backfill_progress tracking
+  const dateHoursMap = new Map();
+  for (const hourId of hourIds) {
+    const date = hourId.slice(0, 10); // YYYY-MM-DD
+    if (!dateHoursMap.has(date)) dateHoursMap.set(date, []);
+    dateHoursMap.get(date).push(hourId);
+  }
+
+  for (const [date, dateHours] of dateHoursMap) {
+    let eventsWrittenForDate = 0;
+    try {
+      for (const hourId of dateHours) {
+        eventsWrittenForDate += await processHour(hourId);
+      }
+      // No date-level flush needed: processHour flushes all partition buffers
+      // at end-of-file in backfill mode, so they're already empty here.
+      await writer.writeBackfillProgress(cmd.runId, date, eventsWrittenForDate);
+      logger.info({ date, eventsWritten: eventsWrittenForDate }, 'date complete — backfill_progress written');
+    } catch (err) {
+      logger.error(
+        { date, partition: err.partitionKey ?? null, sampleEventId: err.sampleEventId ?? null, err: err.message },
+        'failed to process date — no backfill_progress row written'
+      );
+      exitCode = 1;
+      break;
+    }
+  }
+} else {
+  for (const hourId of hourIds) {
+    try {
+      await processHour(hourId);
+    } catch (err) {
+      logger.error({ hourId, err: err.message }, 'failed to process hour — stopping');
+      exitCode = 1;
+      break;
+    }
   }
 }
 
@@ -122,6 +152,7 @@ process.exit(exitCode);
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Returns the number of filtered events written (used by backfill date accumulator).
 async function processHour(hourId) {
   const filePath = hourIdToPath(GHARCHIVE_DIR, hourId);
 
@@ -130,7 +161,7 @@ async function processHour(hourId) {
     const alreadyDone = await writer.isFileProcessed(hourId);
     if (alreadyDone) {
       logger.info({ hourId }, 'already processed, skipping');
-      return;
+      return 0;
     }
   }
 
@@ -148,19 +179,36 @@ async function processHour(hourId) {
   let paused = false;
 
   function onWorkerResult({ results, droppedNoTimestamp, droppedNoId }) {
+    if (writeError) return; // stop buffering once a fatal write error has been observed
     totalDroppedNoTimestamp += droppedNoTimestamp;
     totalDroppedNoId += droppedNoId;
     for (const event of results) {
       totalParsed++;
       inFlight++;
-      writer.writeEvent(event).then(() => {
-        totalFiltered++;
-        inFlight--;
-      }).catch(err => {
-        inFlight--;
-        writeError = err;
-        logger.error({ event_id: event.event_id, partition: `${event.company}/${event.year_month}`, err: err.message }, 'write failed after retries');
-      });
+      if (cmd.mode === 'backfill') {
+        writer.addBackfillEvent(event).then(() => {
+          totalFiltered++;
+          inFlight--;
+        }).catch(err => {
+          inFlight--;
+          if (!writeError) {
+            writeError = err;
+            logger.error(
+              { event_id: err.sampleEventId ?? event.event_id, partition: err.partitionKey ?? `${event.company}/${event.year_month}`, err: err.message },
+              'batch flush failed after retries'
+            );
+          }
+        });
+      } else {
+        writer.writeEvent(event).then(() => {
+          totalFiltered++;
+          inFlight--;
+        }).catch(err => {
+          inFlight--;
+          writeError = err;
+          logger.error({ event_id: event.event_id, partition: `${event.company}/${event.year_month}`, err: err.message }, 'write failed after retries');
+        });
+      }
     }
   }
 
@@ -233,9 +281,13 @@ async function processHour(hourId) {
   await Promise.all(workers.map(w => w.terminate()));
 
   if (writeError) {
-    // Do not write processed_files row — next run will reprocess
-    logger.error({ hourId }, 'hour failed — processed_files NOT written');
+    logger.error({ hourId }, 'hour failed');
     throw writeError;
+  }
+
+  // In backfill mode: flush buffered events accumulated during this file
+  if (cmd.mode === 'backfill') {
+    await writer.flushAllPartitionBuffers();
   }
 
   logger.info({ hourId, totalParsed, totalFiltered, totalDroppedNoTimestamp, totalDroppedNoId }, 'hour complete');
@@ -245,6 +297,8 @@ async function processHour(hourId) {
     await writer.markFileProcessed(hourId, totalParsed, totalFiltered);
     logger.info({ hourId }, 'processed_files row written');
   }
+
+  return totalFiltered;
 }
 
 function spawnWorkers(count) {

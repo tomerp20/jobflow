@@ -1,5 +1,19 @@
 const HOUR_RE = /^\d{4}-\d{2}-\d{2}-\d{1,2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// timeuuid (RFC 4122 v1): 8-4-4-4-12 hex, with the version nibble of the third group = 1.
+const TIMEUUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-1[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Fast-fail if --run-id is missing or not a timeuuid. Calling at parse time
+// avoids ~30 min of wasted work before Cassandra rejects the cast at write time.
+function requireValidRunIdForBackfill(mode, runId) {
+  if (mode !== 'backfill') return;
+  if (!runId) {
+    die('--run-id is required when --mode backfill is in effect');
+  }
+  if (!TIMEUUID_RE.test(runId)) {
+    die('--run-id must be a valid timeuuid (e.g. 6ba7b810-9dad-11d1-80b4-00c04fd430c8)');
+  }
+}
 
 // Parses --target-companies wix:wix,microsoft:azure into [{company, org}, ...]
 function parseTargetCompanies(raw) {
@@ -38,6 +52,8 @@ export function parseCLI(argv) {
       flags.rangeEnd = args[++i];
     } else if (args[i] === '--catchup') {
       flags.catchup = true;
+    } else if (args[i] === '--run-id') {
+      flags.runId = args[++i];
     } else {
       die(`unknown argument: ${args[i]}`);
     }
@@ -59,7 +75,9 @@ export function parseCLI(argv) {
     }
     const h = parseInt(hourId.split('-')[3], 10);
     if (h < 0 || h > 23) die('hour component must be 0–23');
-    return { verb: 'hour', hourId, mode: flags.mode ?? 'hourly', targetCompanies };
+    const mode = flags.mode ?? 'hourly';
+    requireValidRunIdForBackfill(mode, flags.runId);
+    return { verb: 'hour', hourId, mode, runId: flags.runId ?? null, targetCompanies };
   }
 
   if (flags.rangeStart !== undefined || flags.rangeEnd !== undefined) {
@@ -69,17 +87,19 @@ export function parseCLI(argv) {
       die('--range requires two valid YYYY-MM-DD dates (e.g. --range 2025-05-01 2025-05-02)');
     }
     if (start > end) die('--range start date must be <= end date');
-    return { verb: 'range', start, end, mode: flags.mode ?? 'backfill', targetCompanies };
+    const mode = flags.mode ?? 'backfill';
+    requireValidRunIdForBackfill(mode, flags.runId);
+    return { verb: 'range', start, end, mode, runId: flags.runId ?? null, targetCompanies };
   }
 
   if (flags.catchup) {
     if (flags.mode === 'backfill') {
       die('--catchup --mode backfill is not supported; the Backfill Orchestrator uses --range, not --catchup');
     }
-    return { verb: 'catchup', mode: flags.mode ?? 'hourly', targetCompanies };
+    return { verb: 'catchup', mode: flags.mode ?? 'hourly', runId: null, targetCompanies };
   }
 
-  die('usage: ingester.js --hour <YYYY-MM-DD-H> | --range <start> <end> | --catchup  --target-companies <company:org,...> [--mode hourly|backfill]');
+  die('usage: ingester.js --hour <YYYY-MM-DD-H> | --range <start> <end> | --catchup  --target-companies <company:org,...> [--mode hourly|backfill] [--run-id <timeuuid>]');
 }
 
 function die(msg) {
