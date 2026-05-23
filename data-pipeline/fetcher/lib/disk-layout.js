@@ -41,7 +41,7 @@ export function latestOnDisk(rootDir) {
   const ids = [];
   _collectHourIds(rootDir, rootDir, ids);
   if (ids.length === 0) return null;
-  return ids.reduce((best, cur) => _hourIdToMs(cur) > _hourIdToMs(best) ? cur : best);
+  return ids.reduce((best, cur) => hourIdToMs(cur) > hourIdToMs(best) ? cur : best);
 }
 
 function _collectHourIds(root, dir, ids) {
@@ -56,14 +56,31 @@ function _collectHourIds(root, dir, ids) {
     if (entry.isDirectory()) {
       _collectHourIds(root, full, ids);
     } else if (entry.name.endsWith('.json.gz')) {
+      // Only accept files at the canonical depth root/YYYY/MM/DD/H.json.gz.
+      // Stray .json.gz files at other depths would otherwise yield malformed
+      // hour IDs (e.g. undefined-undefined-undefined-NaN) and silently poison
+      // the anchor selection.
+      const rel = path.relative(root, full).split(path.sep);
+      if (rel.length !== 4) continue;
       ids.push(pathToHourId(root, full));
     }
   }
 }
 
-function _hourIdToMs(hourId) {
+// Parses a canonical hour ID (YYYY-MM-DD-H) into a UTC ms timestamp.
+export function hourIdToMs(hourId) {
   const [y, m, d, h] = hourId.split('-').map(Number);
   return Date.UTC(y, m - 1, d, h);
+}
+
+// Formats a UTC ms timestamp as a canonical hour ID (YYYY-MM-DD-H, hour unpadded).
+export function msToHourId(ms) {
+  const d = new Date(ms);
+  const year = d.getUTCFullYear();
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  const hour = d.getUTCHours();
+  return `${year}-${month}-${day}-${hour}`;
 }
 
 // Recursively removes every *.partial file under root. Silently skips missing directories.

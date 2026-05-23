@@ -1,7 +1,7 @@
 import pino from 'pino';
 import pLimit from 'p-limit';
 import { parseCLI } from './lib/cli.js';
-import { cleanPartials, enumerateRange, latestOnDisk } from './lib/disk-layout.js';
+import { cleanPartials, enumerateRange, hourIdToMs, latestOnDisk, msToHourId } from './lib/disk-layout.js';
 import { downloadHour } from './lib/download.js';
 
 const ROOT = process.env.GHARCHIVE_DIR ?? './data/gharchive';
@@ -66,16 +66,17 @@ async function main() {
 async function runCatchup(root, log) {
   const anchor = latestOnDisk(root);
   if (!anchor) {
-    log.error('no anchor to walk from — run --hour or --range first to seed the directory');
-    process.exit(1);
+    // Throw so the main().catch handler exits consistently with other fatal errors
+    // and pino's transport gets a chance to flush before exit.
+    throw new Error('no anchor to walk from — run --hour or --range first to seed the directory');
   }
 
   const ceilingMs = Date.now() - 2 * 3_600_000;
-  const anchorMs = _hourIdToMs(anchor);
+  const anchorMs = hourIdToMs(anchor);
 
   const candidates = [];
   for (let t = anchorMs + 3_600_000; t <= ceilingMs; t += 3_600_000) {
-    candidates.push(_msToHourId(t));
+    candidates.push(msToHourId(t));
   }
 
   if (candidates.length === 0) {
@@ -118,20 +119,6 @@ async function runCatchup(root, log) {
     {}
   );
   log.info(tally, 'catchup done');
-}
-
-function _hourIdToMs(hourId) {
-  const [y, m, d, h] = hourId.split('-').map(Number);
-  return Date.UTC(y, m - 1, d, h);
-}
-
-function _msToHourId(ms) {
-  const d = new Date(ms);
-  const year = d.getUTCFullYear();
-  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  const hour = d.getUTCHours();
-  return `${year}-${month}-${day}-${hour}`;
 }
 
 main().catch((err) => {
