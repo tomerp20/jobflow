@@ -58,7 +58,11 @@ async function main() {
     process.exit(0);
   }
 
-  const targetCompanies = companies.map(r => `${r.company}:${r.org_name}`).join(',');
+  // URL-encode each token so values containing ':' or ',' can't break the
+  // company:org,company:org wire format the Ingester parses. Mirrors backfill.js.
+  const targetCompanies = companies
+    .map(r => `${encodeURIComponent(r.company)}:${encodeURIComponent(r.org_name)}`)
+    .join(',');
   logger.info({ count: companies.length, targetCompanies }, 'companies loaded — spawning ingester');
 
   // ── Spawn ingester ──────────────────────────────────────────────────────────
