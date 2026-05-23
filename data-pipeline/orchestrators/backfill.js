@@ -5,7 +5,7 @@ import pino from 'pino';
 import { readUninitialised } from './lib/companies-state.js';
 import { spawnIngester } from './lib/spawn-ingester.js';
 import { findLatestRun, createNewRun, markCompleted, markFailed, getMaxCompletedDate } from './lib/run-state.js';
-import { earliestOnDisk, yesterdayUtc } from './lib/disk-bounds.js';
+import { earliestOnDisk, latestCompleteDateOnDisk, diskBounds, yesterdayUtc } from './lib/disk-bounds.js';
 
 const { Client } = cassandra;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -76,12 +76,20 @@ async function main() {
     const latestRun = await findLatestRun(client, CASSANDRA_KEYSPACE);
     const yesterday = yesterdayUtc();
 
-    let runId, targetRows, startDate;
+    let runId, targetRows, startDate, endDate;
 
     if (latestRun && latestRun.status === 'in_progress') {
       // ── Resume path ─────────────────────────────────────────────────────────
       runId = latestRun.runId;
       targetRows = latestRun.targetRows;
+
+      try {
+        endDate = latestCompleteDateOnDisk(GHARCHIVE_DIR);
+      } catch (err) {
+        logger.fatal({ err }, 'cannot determine end date');
+        await client.shutdown().catch(() => {});
+        process.exit(1);
+      }
 
       const maxDate = await getMaxCompletedDate(client, CASSANDRA_KEYSPACE, runId);
       if (maxDate !== null) {
@@ -100,14 +108,22 @@ async function main() {
         }
       }
 
-      logger.info({ runId: runId.toString(), startDate, endDate: yesterday, companies: targetRows.length }, 'resuming run');
+      if (endDate < yesterday) {
+        logger.warn(
+          { latestCompleteDateOnDisk: endDate, yesterdayUtc: yesterday },
+          'archive does not reach yesterday — backfill will stop at latestCompleteDateOnDisk; run the Fetcher to catch up if you want to include more recent dates'
+        );
+      }
+
+      logger.info({ runId: runId.toString(), startDate, endDate, companies: targetRows.length }, 'resuming run');
     } else {
       // ── Fresh path (no row, completed, or failed) ────────────────────────────
-      let earliest;
+      // Single enumerateAllOnDisk walk for both bounds.
+      let bounds;
       try {
-        earliest = earliestOnDisk(GHARCHIVE_DIR);
+        bounds = diskBounds(GHARCHIVE_DIR);
       } catch (err) {
-        logger.fatal({ err }, 'cannot determine start date for fresh run');
+        logger.fatal({ err }, 'cannot determine disk bounds for fresh run');
         await client.shutdown().catch(() => {});
         process.exit(1);
       }
@@ -115,13 +131,21 @@ async function main() {
       const created = await createNewRun(client, CASSANDRA_KEYSPACE, uninitialised);
       runId = created.runId;
       targetRows = created.targetRows;
-      startDate = earliest;
+      startDate = bounds.earliest;
+      endDate = bounds.latestComplete;
 
-      logger.info({ runId: runId.toString(), startDate, endDate: yesterday, companies: targetRows.length }, 'starting fresh run');
+      if (endDate < yesterday) {
+        logger.warn(
+          { latestCompleteDateOnDisk: endDate, yesterdayUtc: yesterday },
+          'archive does not reach yesterday — backfill will stop at latestCompleteDateOnDisk; run the Fetcher to catch up if you want to include more recent dates'
+        );
+      }
+
+      logger.info({ runId: runId.toString(), startDate, endDate, companies: targetRows.length }, 'starting fresh run');
     }
 
     // ── Skip spawn if all dates already covered ───────────────────────────────
-    if (startDate > yesterday) {
+    if (startDate > endDate) {
       logger.info({ runId: runId.toString() }, 'all dates already processed — flipping companies');
       await markCompleted(client, CASSANDRA_KEYSPACE, runId, targetRows);
       await client.shutdown();
@@ -132,12 +156,12 @@ async function main() {
     const targetCompaniesArg = targetRows.map(r => `${r.company}:${r.org_name}`).join(',');
     const ingesterPath = path.resolve(__dirname, '..', 'ingester', 'ingester.js');
 
-    logger.info({ startDate, endDate: yesterday, companies: targetRows.length }, 'spawning ingester');
+    logger.info({ startDate, endDate, companies: targetRows.length }, 'spawning ingester');
 
     const exitCode = await spawnIngester(
       [
         ingesterPath,
-        '--range', startDate, yesterday,
+        '--range', startDate, endDate,
         '--mode', 'backfill',
         '--target-companies', targetCompaniesArg,
         '--run-id', runId.toString(),
@@ -149,7 +173,7 @@ async function main() {
     if (exitCode === 0) {
       // If markCompleted throws here the backfill_runs row stays in_progress,
       // even though every hour has been ingested. That is recoverable: the next
-      // nightly run will enter the resume path, find startDate > yesterday at
+      // nightly run will enter the resume path, find startDate > endDate at
       // the "all dates already processed" short-circuit above, and retry
       // markCompleted. The companies UPDATEs are idempotent, so this is safe.
       await markCompleted(client, CASSANDRA_KEYSPACE, runId, targetRows);
