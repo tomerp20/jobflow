@@ -1,0 +1,22 @@
+{
+  "name": "jobflow-ingester",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Reads GH Archive .json.gz files, filters to target companies, writes to Cassandra",
+  "main": "ingester.js",
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "scripts": {
+    "start": "node --env-file=.env ingester.js"
+  },
+  "dependencies": {
+    "cassandra-driver": "^4.7.2",
+    "disk-layout": "file:../shared/disk-layout",
+    "p-limit": "^6.0.0",
+    "pino": "^9.0.0"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13.0.0"
+  }
+}
