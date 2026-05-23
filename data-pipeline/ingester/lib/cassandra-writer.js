@@ -159,25 +159,20 @@ export class CassandraWriter {
       ],
     }));
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    // MAX_RETRIES = 3 means: try once, then retry up to 3 more times with the
+    // RETRY_DELAYS backoffs between attempts. Total attempts = 1 + MAX_RETRIES.
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         await this._client.batch(queries, { logged: false, prepare: true });
         return;
       } catch (err) {
-        if (!isRetryable(err)) {
+        if (!isRetryable(err) || attempt === MAX_RETRIES) {
           const batchErr = new Error(err.message);
           batchErr.partitionKey = partitionKey;
           batchErr.sampleEventId = rows[0]?.event_id;
           throw batchErr;
         }
-        if (attempt < MAX_RETRIES - 1) {
-          await sleep(RETRY_DELAYS[attempt]);
-        } else {
-          const batchErr = new Error(err.message);
-          batchErr.partitionKey = partitionKey;
-          batchErr.sampleEventId = rows[0]?.event_id;
-          throw batchErr;
-        }
+        await sleep(RETRY_DELAYS[attempt]);
       }
     }
   }
@@ -244,7 +239,7 @@ function estimateEventBytes(event) {
     (event.org_name?.length ?? 0) +
     (event.year_month?.length ?? 0) +
     8 + // event_time (timestamp)
-    8 + // event_id (int64)
+    (event.event_id?.length ?? 0) + // event_id (string, ~10-12 chars for GH Archive ids)
     (event.event_type?.length ?? 0) +
     (event.repo_name?.length ?? 0) +
     (event.actor_login?.length ?? 0) +

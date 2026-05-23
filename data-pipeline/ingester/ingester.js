@@ -122,8 +122,8 @@ if (cmd.mode === 'backfill' && cmd.verb === 'range') {
       for (const hourId of dateHours) {
         eventsWrittenForDate += await processHour(hourId);
       }
-      // Flush any remaining partial partition buffers after all hours for this date
-      await writer.flushAllPartitionBuffers();
+      // No date-level flush needed: processHour flushes all partition buffers
+      // at end-of-file in backfill mode, so they're already empty here.
       await writer.writeBackfillProgress(cmd.runId, date, eventsWrittenForDate);
       logger.info({ date, eventsWritten: eventsWrittenForDate }, 'date complete — backfill_progress written');
     } catch (err) {
@@ -179,6 +179,7 @@ async function processHour(hourId) {
   let paused = false;
 
   function onWorkerResult({ results, droppedNoTimestamp, droppedNoId }) {
+    if (writeError) return; // stop buffering once a fatal write error has been observed
     totalDroppedNoTimestamp += droppedNoTimestamp;
     totalDroppedNoId += droppedNoId;
     for (const event of results) {
