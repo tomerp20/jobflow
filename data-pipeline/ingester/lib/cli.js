@@ -75,6 +75,9 @@ export function parseCLI(argv) {
     }
     const h = parseInt(hourId.split('-')[3], 10);
     if (h < 0 || h > 23) die('hour component must be 0–23');
+    if (flags.mode === 'backfill') {
+      die('--hour --mode backfill is not supported; use --range A A for a one-day backfill');
+    }
     const mode = flags.mode ?? 'hourly';
     requireValidRunIdForBackfill(mode, flags.runId);
     return { verb: 'hour', hourId, mode, runId: flags.runId ?? null, targetCompanies };
