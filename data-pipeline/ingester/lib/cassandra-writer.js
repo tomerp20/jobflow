@@ -74,7 +74,7 @@ export class CassandraWriter {
       const sorted = [...this._partitionWindow.entries()]
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3);
-      this._logger.debug(
+      this._logger.info(
         { partitions: sorted.map(([k, v]) => ({ partition: k, writesPerSec: +(v / TICK_INTERVAL_S).toFixed(1) })) },
         'partition write rate'
       );
