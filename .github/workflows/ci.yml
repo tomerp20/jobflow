@@ -46,6 +46,21 @@ jobs:
       run:
         working-directory: backend
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: jobflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -60,7 +75,7 @@ jobs:
       - name: Run integration tests
         run: npm run test:integration
         env:
-          INTEGRATION_DATABASE_URL: ${{ secrets.INTEGRATION_DATABASE_URL }}
+          INTEGRATION_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jobflow_test
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
   frontend-build:
