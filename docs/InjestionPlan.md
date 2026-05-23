@@ -135,9 +135,11 @@ CREATE TABLE jobflow.backfill_progress (
 
 **Companies added mid-backfill wait for the next night's run.** The current run's `target_rows` is locked at row insert in step 3 and never changes for the lifetime of that run.
 
-### 3.3 `processed_files` — already in main RFC
+### 3.3 `processed_files` — already in main RFC, hourly-only
 
-No schema changes in PR1. The `file_name` column stores the canonical hour ID `YYYY-MM-DD-H` (hour unpadded — `2025-05-01-15`), matching GH Archive's URL convention. See main RFC §4.3 for full semantics. The hourly path uses this to skip already-ingested files.
+No schema changes in PR1. The `file_name` column stores the canonical hour ID `YYYY-MM-DD-H` (hour unpadded — `2025-05-01-15`), matching GH Archive's URL convention. See main RFC §4.3 for full semantics.
+
+**Only the Hourly Ingest reads or writes this table.** Backfill mode never touches `processed_files` — it uses `backfill_progress` (per-date) for crash recovery instead. See ADR 0005 for the design rationale; the short version is that a per-file "done" marker keyed only by file_name causes data loss for Companies added between Backfill Runs.
 
 ---
 
@@ -202,18 +204,21 @@ All modes use `p-limit(3)` for download concurrency. v1 needs nothing more — t
 ## 5. Ingester
 
 ### 5.1 Responsibilities
-- Read one `.json.gz` file from disk.
-- Filter events by company against the in-memory company-org map.
+- Read one or more `.json.gz` files from disk (range determined by CLI args).
+- Filter events by company against the in-memory company-org map **built from the `--target-companies` CLI argument** (per ADR 0004, the Ingester is companies-agnostic; it never reads the `companies` Cassandra table).
 - Extract tech tags and AI signal.
 - Write to `company_events`.
-- Mark the file as processed in `processed_files`.
+- In `--mode hourly`: mark each file as processed in `processed_files`.
+- In `--mode backfill`: write a `backfill_progress` row per completed date (using the `--run-id` arg); do not touch `processed_files`.
+
+The Ingester is a pure stateless worker. All per-job parameters arrive as CLI args; service-level configuration arrives as env vars. See ADR 0004 for the discipline; see ADR 0005 for why `processed_files` is hourly-only.
 
 ### 5.2 The fast filter (load-bearing optimization)
 
 For each line in the file, **before parsing JSON**, run a substring check for any tracked org name. If no match, skip immediately. Only parse JSON for lines that pass the fast filter.
 
 ```javascript
-// Build at startup from the companies table:
+// Build at startup from the --target-companies CLI argument:
 //   "wix/" | "honeybook/" | "upwind/" | ...
 // The "/" suffix anchors to repo.name's "org/repo" format,
 // reducing false positives from arbitrary text matching org names.
@@ -261,18 +266,27 @@ Cassandra batches are tricky — only batch rows in the same partition (`(compan
 ### 5.5 Modes
 
 ```bash
-node ingester.js --file /mnt/hdd/gharchive/2026/05/22/15.json.gz
-node ingester.js --range 2026-05-01 2026-05-22 --mode backfill
-node ingester.js --catchup --mode hourly
+node ingester.js --hour 2026-05-22-15 --mode hourly \
+  --target-companies wix:wix,microsoft:azure
+node ingester.js --range 2026-05-01 2026-05-22 --mode backfill \
+  --target-companies wix:wix,microsoft:azure \
+  --run-id <timeuuid>
+node ingester.js --catchup --mode hourly \
+  --target-companies wix:wix,microsoft:azure
 ```
 
-`--mode` switches the write strategy (individual vs batched) and the company filter (initialized=true vs initialized=false).
+`--mode` switches the write strategy (individual prepared inserts via p-limit(50) for hourly; UNLOGGED per-partition batches for backfill) and toggles the per-mode side effects:
+- `--mode hourly` reads and writes `processed_files`; does not touch `backfill_progress` or `backfill_runs`.
+- `--mode backfill` writes `backfill_progress` rows per completed date (requires `--run-id`); never touches `processed_files`.
+
+`--target-companies` is required in both modes and is the sole source of truth for the in-memory company-org filter. The Orchestrator (PR3) is responsible for reading `companies` from Cassandra and passing the appropriate filtered list. See ADR 0004 for the args-vs-env-vars contract.
 
 ### 5.6 Idempotency
 
-Re-ingesting the same file is safe:
+Re-ingesting the same file is safe in both modes:
 - `company_events` upserts on the full primary key — re-writes produce identical rows.
-- `processed_files` row already exists → ingester logs "already processed, skipping" and exits.
+- `--mode hourly`: `processed_files` row already exists → Ingester logs "already processed, skipping" and exits.
+- `--mode backfill`: the Ingester walks dates from the `--range` start. On startup, the Backfill Orchestrator has already adjusted `--range` to begin at the first non-completed date from `backfill_progress`, so the Ingester re-processes at most one in-progress date's files from scratch. Crash recovery cost: ~30 min to 2 hours of re-reads per crash; the writes are idempotent.
 
 ### 5.7 SSD scratch optimization (backfill only)
 

@@ -152,7 +152,9 @@ CREATE TABLE jobflow.processed_files (
 
 The `file_name` column stores the canonical hour ID `YYYY-MM-DD-H` (hour unpadded — `2025-05-01-15`, not `15.json.gz` or a full filesystem path). This matches GH Archive's URL convention and decouples the table from the on-disk layout. `event_count` is the total number of events parsed from the file; `filtered_count` is the subset that survived company-filtering and was written to `company_events`. Row existence implies successful processing — there is no status column.
 
-The ingestion script checks this table before processing each file. Re-running the pipeline on already-processed files becomes a no-op. Without this, re-runs during development produce duplicate rows in `company_events` (harmless thanks to the schema, but pollutes counts and wastes time).
+**Read and written only by the Hourly Ingest.** The Backfill never touches this table — it uses `backfill_progress` (per-date) for crash recovery instead. See ADR 0005 for the design rationale; the per-file marker keyed only by file_name caused data loss when a Company was added between Backfill Runs, because the file appeared "done" globally even though no events for the new Company had been written.
+
+The Hourly Ingest checks this table before processing each file. Re-running the Hourly Ingest on already-processed files is a no-op. Without this, re-runs during development would produce duplicate rows in `company_events` (harmless thanks to the upsert schema, but pollutes counts and wastes time).
 
 ### 4.4 Table: `companies`
 
