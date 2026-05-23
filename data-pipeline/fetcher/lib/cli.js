@@ -27,7 +27,14 @@ export function parseCLI(argv) {
     return { mode: 'range', start, end };
   }
 
-  die('usage: fetcher.js --hour <YYYY-MM-DD-H> | --range <YYYY-MM-DD> <YYYY-MM-DD>');
+  if (args[0] === '--catchup') {
+    if (args.length > 1) {
+      die('--catchup takes no arguments');
+    }
+    return { mode: 'catchup' };
+  }
+
+  die('usage: fetcher.js --hour <YYYY-MM-DD-H> | --range <YYYY-MM-DD> <YYYY-MM-DD> | --catchup');
 }
 
 function die(msg) {
