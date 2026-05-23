@@ -7,7 +7,11 @@ set -euo pipefail
 
 MIN_FREE_GB=50
 HDD_MOUNT="/mnt/hdd"
-BACKFILL_START_DATE="2025-05-22"
+
+# Default: 1 year of data, matching the plan's stated yearly-coverage goal.
+# Override via env on the cron line, the operator's shell, or data-pipeline/.env
+# (the .env block below runs after this line, so an override there still wins).
+BACKFILL_START_DATE="${BACKFILL_START_DATE:-$(date -u -d '1 year ago' +%Y-%m-%d)}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DATA_PIPELINE_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
@@ -35,7 +39,7 @@ fi
 
 cd "${REPO_ROOT}"
 
-END_DATE="$(date -u -d 'yesterday' +%Y-%m-%d)"
+END_DATE="${END_DATE:-$(date -u -d 'yesterday' +%Y-%m-%d)}"
 
 node data-pipeline/fetcher/fetcher.js --range "${BACKFILL_START_DATE}" "${END_DATE}"
 node data-pipeline/orchestrators/backfill.js

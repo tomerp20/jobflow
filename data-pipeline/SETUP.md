@@ -137,6 +137,26 @@ EOF
 Per-binary `.env.example` files live under `data-pipeline/{fetcher,ingester,orchestrators}/`
 for reference. The single `data-pipeline/.env` above is the one the cron scripts read.
 
+#### Backfill date-range overrides
+
+`run-backfill.sh` accepts two optional env vars that control the date range
+passed to the Fetcher and Backfill Orchestrator:
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `BACKFILL_START_DATE` | `$(date -u -d '1 year ago' +%Y-%m-%d)` | Inclusive start of the range. |
+| `END_DATE` | `$(date -u -d 'yesterday' +%Y-%m-%d)` | Inclusive end of the range. |
+
+Both can be overridden in three places (later wins):
+
+1. The cron line or operator shell (e.g. `BACKFILL_START_DATE=2026-01-01 ./data-pipeline/scripts/run-backfill.sh`).
+2. The persistent `data-pipeline/.env` file (sourced after the defaults are set).
+3. A one-off invocation that exports the var before calling the script.
+
+The 1-year default matches the plan's stated yearly-coverage goal. Add a line
+like `BACKFILL_START_DATE=2024-01-01` to `data-pipeline/.env` for a persistent
+custom backfill window.
+
 ---
 
 ## Step 2 — Run `bootstrap.sh`
