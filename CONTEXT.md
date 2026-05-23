@@ -8,6 +8,14 @@ A personal job search pipeline manager. Users track job applications from discov
 A single job pursuit at a specific company — created when the user decides to track a role, and closed when the process ends (offer, rejection, or withdrawal).
 _Avoid_: Card (UI term only), Job, Opportunity
 
+**Company**:
+The employer named on an Application. JobFlow does not store Companies as their own entity — the name lives as a field on each Application, and many Applications may name the same Company. Two Applications naming the same Company, compared ignoring case and surrounding whitespace, refer to the same Company.
+_Avoid_: Employer, Organization (reserve "organization" / "org" for a GitHub org)
+
+**First Sighting**:
+The first time a given Company is named on any Application, across all users. Determined by comparing Company names ignoring case and surrounding whitespace. A First Sighting is the event that triggers the Company Scout; later Applications naming the same Company are not First Sightings.
+_Avoid_: New company, First occurrence
+
 **Stage**:
 A user-defined step in the hiring pipeline that an Application moves through (e.g. Wishlist, Applied, Final Interview). Each user owns their own set of Stages. One Stage per user carries an `is_default` flag used as a fallback target when another Stage is deleted.
 _Avoid_: Status, Column, State
@@ -27,6 +35,14 @@ _Avoid_: Rejection Agent, Email Processor, Inbox Monitor
 **Application Receipt**:
 An email sent by a company to acknowledge that they received a job application. When the Email Agent detects one with no matching Application in the system, it auto-creates a new Application. Not to be confused with a rejection — an Application Receipt confirms receipt, not outcome.
 _Avoid_: Application confirmation, Acknowledgement email, Receipt email
+
+**Company Scout**:
+An automated process that runs on a Company's First Sighting. It resolves the Company to a public GitHub organization and classifies whether that organization has an Active GitHub Presence. Its result feeds the separate JobFlow Analytics system; it produces no Notification and no user-facing change. A sibling of the Email Agent — an automated process acting on Applications — but triggered by Company novelty rather than by email.
+_Avoid_: Company Profiler, GitHub Checker, Company Agent
+
+**Active GitHub Presence**:
+The classification the Company Scout assigns to a Company: its resolved GitHub organization has at least one public repository that is not a fork, not archived, and was pushed to within the last year. A Company with no resolvable organization, or whose repositories are all older, does not have an Active GitHub Presence.
+_Avoid_: Active repos, Live org
 
 **Activity**:
 A row in `card_activities` representing either a system-recorded event (action = `created`, `updated`, or `moved`) or a user-authored Note (action = `note_added`). System Activities are created automatically when an Application is created, a field changes, or the Application moves to a new Stage.
@@ -59,6 +75,8 @@ _Avoid_: Todo (internal/DB term), Checklist item
 - The **Email Agent** auto-creates **Applications** in the **Applied Stage** when an Application Receipt is detected and no matching Application exists
 - The **Email Agent** produces **Notifications** to inform the user of every automated action it takes
 - A **Task** may optionally be linked to an **Application**; a **Task** without a link is standalone
+- The **First Sighting** of a **Company** on a new **Application** triggers the **Company Scout**
+- The **Company Scout** classifies a **Company** as having an **Active GitHub Presence** or not, and reports the ones that do to the JobFlow Analytics system
 
 ## Example dialogue
 
