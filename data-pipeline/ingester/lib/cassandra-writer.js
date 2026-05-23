@@ -1,10 +1,24 @@
 import cassandra from 'cassandra-driver';
 import pLimit from 'p-limit';
 
-const { Client, types } = cassandra;
+const { Client, types, errors, policies } = cassandra;
 
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [100, 500, 2000];
+
+// Cassandra response error codes that are transient and safe to retry
+const RETRYABLE_CODES = new Set([
+  0x1000, // UnavailableException
+  0x1001, // IsBootstrapping / Overloaded
+  0x1100, // WriteTimeout
+  0x1200, // ReadTimeout
+]);
+
+function isRetryable(err) {
+  if (err instanceof errors.OperationTimedOutError) return true;
+  if (err instanceof errors.ResponseError) return RETRYABLE_CODES.has(err.code);
+  return false;
+}
 
 export class CassandraWriter {
   constructor({ contactPoints, localDc, keyspace, logger, writeConcurrency = 50 }) {
@@ -13,7 +27,7 @@ export class CassandraWriter {
       localDataCenter: localDc,
       keyspace,
       policies: {
-        retry: new cassandra.policies.retry.RetryPolicy(),
+        retry: new policies.retry.DefaultRetryPolicy(),
       },
       queryOptions: {
         consistency: types.consistencies.localOne,
@@ -29,7 +43,6 @@ export class CassandraWriter {
     this._processedFilesSelectStmt = null;
 
     // Partition write rate tracking
-    this._partitionCounts = new Map();
     this._partitionWindow = new Map();
     this._rateTimer = null;
   }
@@ -94,11 +107,13 @@ export class CassandraWriter {
       event.tech_tags,
     ];
 
-    for (let attempt = 0; attempt <= MAX_RETRIES - 1; attempt++) {
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
         await this._client.execute(this._insertStmt, params, { prepare: true });
         return;
       } catch (err) {
+        // Fail fast on non-transient errors (syntax error, invalid query, etc.)
+        if (!isRetryable(err)) throw err;
         if (attempt < MAX_RETRIES - 1) {
           await sleep(RETRY_DELAYS[attempt]);
         } else {

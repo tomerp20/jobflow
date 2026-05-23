@@ -52,8 +52,10 @@ for (const { company, org } of cmd.targetCompanies) {
   orgToCompany[org] = company;
 }
 const orgNames = Object.keys(orgToCompany);
-// "/" suffix anchors to repo.name format, reducing false positives
-const orgRegexSource = orgNames.map(o => o + '/').join('|');
+// Escape metacharacters before joining — org names are user-supplied via CLI
+// and could contain dots or other regex chars that would cause ReDoS or silent mismatch.
+// "/" suffix anchors to repo.name format, reducing false positives.
+const orgRegexSource = orgNames.map(o => escapeRegex(o) + '/').join('|');
 
 logger.info({ workers: INGEST_WORKERS, mode: cmd.mode, orgs: orgNames }, 'ingester starting');
 
@@ -135,25 +137,21 @@ async function processHour(hourId) {
 
   let totalParsed = 0;
   let totalFiltered = 0;
+  let totalDroppedNoTimestamp = 0;
+  let totalDroppedNoId = 0;
   let inFlight = 0;
   let writeError = null;
   let paused = false;
 
-  function onWorkerResult(events) {
-    for (const event of events) {
+  function onWorkerResult({ results, droppedNoTimestamp, droppedNoId }) {
+    totalDroppedNoTimestamp += droppedNoTimestamp;
+    totalDroppedNoId += droppedNoId;
+    for (const event of results) {
       totalParsed++;
       inFlight++;
       writer.writeEvent(event).then(() => {
         totalFiltered++;
         inFlight--;
-        if (paused && inFlight <= 5000) {
-          paused = false;
-          if (resumeCallback) {
-            const cb = resumeCallback;
-            resumeCallback = null;
-            cb();
-          }
-        }
       }).catch(err => {
         inFlight--;
         writeError = err;
@@ -227,10 +225,8 @@ async function processHour(hourId) {
     await sleep(50);
   }
 
-  // Terminate workers
-  for (const w of workers) {
-    await w.terminate();
-  }
+  // Terminate workers (parallel)
+  await Promise.all(workers.map(w => w.terminate()));
 
   if (writeError) {
     // Do not write processed_files row — next run will reprocess
@@ -238,7 +234,7 @@ async function processHour(hourId) {
     throw writeError;
   }
 
-  logger.info({ hourId, totalParsed, totalFiltered }, 'hour complete');
+  logger.info({ hourId, totalParsed, totalFiltered, totalDroppedNoTimestamp, totalDroppedNoId }, 'hour complete');
 
   // In --mode hourly: mark file processed
   if (cmd.mode === 'hourly') {
@@ -257,3 +253,16 @@ function spawnWorkers(count) {
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Graceful shutdown on SIGINT/SIGTERM so pino flushes and Cassandra connection closes cleanly.
+async function gracefulShutdown(signal) {
+  logger.info({ signal }, 'shutting down');
+  await writer.shutdown();
+  process.exit(0);
+}
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

@@ -2,7 +2,8 @@ import { workerData, parentPort } from 'worker_threads';
 import { extractTags } from './lib/tag-extractor.js';
 import { detectAI } from './lib/ai-detector.js';
 
-const { orgRegex: orgRegexSource, orgToCompany } = workerData;
+const { orgRegexSource, orgToCompany } = workerData;
+if (!orgRegexSource) throw new Error('workerData.orgRegexSource is required');
 
 // Rebuild RegExp from transferred source string (RegExp is not transferable)
 const orgRegex = new RegExp(orgRegexSource);
@@ -11,6 +12,8 @@ const ALLOWED_TYPES = new Set(['PushEvent', 'PullRequestEvent', 'IssuesEvent', '
 
 parentPort.on('message', (lines) => {
   const results = [];
+  let droppedNoTimestamp = 0;
+  let droppedNoId = 0;
 
   for (const line of lines) {
     // Fast filter: substring regex on raw line before any JSON.parse
@@ -33,7 +36,9 @@ parentPort.on('message', (lines) => {
     if (!company) continue;
 
     const createdAt = event.created_at;
-    if (!createdAt) continue;
+    if (!createdAt) { droppedNoTimestamp++; continue; }
+
+    if (!event.id) { droppedNoId++; continue; }
 
     const yearMonth = new Date(createdAt).toISOString().slice(0, 7);
     const techTags = [...extractTags(event)];
@@ -53,5 +58,5 @@ parentPort.on('message', (lines) => {
     });
   }
 
-  parentPort.postMessage(results);
+  parentPort.postMessage({ results, droppedNoTimestamp, droppedNoId });
 });
