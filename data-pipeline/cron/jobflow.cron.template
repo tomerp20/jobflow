@@ -1,0 +1,24 @@
+# JobFlow data-pipeline cron schedule.
+#
+# Installed at /etc/cron.d/jobflow by data-pipeline/scripts/bootstrap.sh.
+# Placeholders @JOBFLOW_ROOT@, @USER@, @HOME@, @NODE_BIN_DIR@ are substituted
+# at install time.
+#
+# Lock coordination (docs/InjestionPlan.md §6.1):
+#   • Backfill holds /var/lock/jobflow-backfill.lock for the whole run.
+#   • Hourly takes its own lock AND checks the backfill lock; if backfill is
+#     running, the hourly skips this interval (logged to hourly-skips.log).
+#     The skip path is distinct from the failure path: a genuine run-hourly.sh
+#     failure propagates a non-zero exit to cron rather than being recorded
+#     as a skip.
+
+SHELL=/bin/bash
+PATH=@NODE_BIN_DIR@:/usr/local/bin:/usr/bin:/bin
+HOME=@HOME@
+
+# Backfill — nightly at 00:00. flock -n means stacked backfills skip silently.
+0 0 * * * @USER@ flock -n /var/lock/jobflow-backfill.lock @JOBFLOW_ROOT@/data-pipeline/scripts/run-backfill.sh >> @HOME@/jobflow-logs/backfill.log 2>&1
+
+# Hourly — every hour at :15. Nested flock: outer = own lock, inner = check backfill lock without holding it.
+# Branching `if` keeps the skip path (false branch) distinct from a genuine run-hourly.sh failure (true branch's exit code propagates).
+15 * * * * @USER@ flock -n /var/lock/jobflow-hourly.lock -c 'if flock -n /var/lock/jobflow-backfill.lock true; then @JOBFLOW_ROOT@/data-pipeline/scripts/run-hourly.sh; else echo "$(date -u +\%Y-\%m-\%dT\%H:\%M:\%SZ) skipping: backfill in progress" >> @HOME@/jobflow-logs/hourly-skips.log; fi' >> @HOME@/jobflow-logs/hourly.log 2>&1
