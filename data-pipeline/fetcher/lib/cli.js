@@ -10,6 +10,8 @@ export function parseCLI(argv) {
     if (!hourId || !HOUR_RE.test(hourId)) {
       die('--hour requires a valid YYYY-MM-DD-H value (e.g. 2025-05-01-15)');
     }
+    const h = parseInt(hourId.split('-')[3], 10);
+    if (h < 0 || h > 23) die('hour component must be 0–23');
     return { mode: 'hour', hourId };
   }
 

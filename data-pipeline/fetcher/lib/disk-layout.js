@@ -13,7 +13,7 @@ export function pathToHourId(root, filePath) {
   const rel = path.relative(root, filePath);
   const parts = rel.split(path.sep);
   const [year, month, day, file] = parts;
-  const hour = file.replace('.json.gz', '');
+  const hour = file.replace(/\.json\.gz$/, '');
   return `${year}-${month}-${day}-${parseInt(hour, 10)}`;
 }
 

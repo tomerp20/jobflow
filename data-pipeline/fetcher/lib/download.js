@@ -38,26 +38,36 @@ export async function downloadHour(root, hourId) {
     }
 
     if (res.status === 404) {
+      await res.body?.cancel();
       return { status: 'not-found', hourId };
     }
 
     if (res.status >= 500) {
+      await res.body?.cancel();
       lastError = new Error(`HTTP ${res.status}`);
       continue;
     }
 
     if (!res.ok) {
+      await res.body?.cancel();
       return { status: 'failed-after-retries', hourId, error: `HTTP ${res.status}` };
     }
 
     try {
       await pipeline(Readable.fromWeb(res.body), createWriteStream(partialPath));
-      renameSync(partialPath, finalPath);
-      return { status: 'written', hourId };
     } catch (err) {
       lastError = err;
       tryUnlink(partialPath);
+      continue;
     }
+
+    try {
+      renameSync(partialPath, finalPath);
+    } catch (err) {
+      tryUnlink(partialPath);
+      return { status: 'failed-after-retries', hourId, error: err.message };
+    }
+    return { status: 'written', hourId };
   }
 
   return { status: 'failed-after-retries', hourId, error: lastError?.message };

@@ -29,7 +29,7 @@ async function main() {
 
   const limit = pLimit(3);
 
-  const results = await Promise.all(
+  const settled = await Promise.allSettled(
     hours.map((hourId) =>
       limit(async () => {
         const result = await downloadHour(ROOT, hourId);
@@ -43,6 +43,12 @@ async function main() {
         return result;
       })
     )
+  );
+
+  const results = settled.map((s) =>
+    s.status === 'fulfilled'
+      ? s.value
+      : { status: 'failed-after-retries', error: s.reason?.message }
   );
 
   const tally = results.reduce(
