@@ -13,6 +13,10 @@ Each entry: **what happened → what we'd change**. Skip generic platitudes.
 
 ---
 
+## 2026-05-24 (PR #242 — fetcher p-limit bump)
+
+- **File size varies ~3× across different months of GH Archive.** Jan 2025 files averaged ~77 MB/hour vs ~25 MB for May 2026 — GitHub event volume grew significantly. When benchmarking fetcher throughput, files/sec is a misleading metric across different date ranges; MB/s is the correct comparison. The p-limit(3→6) bump yielded ~2.2× MB/s improvement (71 vs 33 MB/s) on the Xubuntu box, clearing the >1.3× approval threshold.
+
 ## 2026-05-24 (PR #241 — ingester worker-side decompression)
 
 - **Main-thread readline is the silent bottleneck in Node.js streaming pipelines.** When the hot loop is `readline.on('line')` dispatching to workers via `postMessage`, the workers starve because the main thread can't feed them fast enough — even if libuv (gunzip) and the workers themselves are under capacity. The fix is to move the entire `createReadStream → createGunzip → createInterface` pipeline into each worker so each worker pulls directly from disk. → Before profiling worker starvation, check main-thread CPU utilization — if the main thread is hot while workers idle, the bottleneck is the dispatch loop, not the workers.
