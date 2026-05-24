@@ -1,9 +1,9 @@
 # JobFlow Cassandra Write Shim — Operator Runbook
 
-The shim is a small Node HTTP service running on the Xubuntu box at
-`tomer@192.168.10.12`. It exposes one authenticated endpoint (`POST /companies`)
-that JobFlow's `HttpShimCompanyRegistry` calls to register `(company, org)` pairs
-into the `jobflow.companies` Cassandra table using `INSERT … IF NOT EXISTS`.
+The shim is a small Node HTTP service that runs in a Docker container on the
+Linux deploy box. It exposes one authenticated endpoint (`POST /companies`)
+that JobFlow's `HttpShimCompanyRegistry` calls to register `(company, org)`
+pairs into the `jobflow.companies` Cassandra table using `INSERT … IF NOT EXISTS`.
 
 ---
 
@@ -12,107 +12,117 @@ into the `jobflow.companies` Cassandra table using `INSERT … IF NOT EXISTS`.
 ```
 Render (JobFlow)
   └─ HttpShimCompanyRegistry
-       └─ POST https://YOUR_DOMAIN/companies
-            └─ Caddy (TLS termination, Let's Encrypt)
-                 └─ 127.0.0.1:3100 ← shim.js (systemd: jobflow-shim)
-                      └─ 127.0.0.1:9042 ← Cassandra (Docker)
+       └─ POST https://YOUR_NGROK_HOST/companies
+            └─ ngrok edge (TLS termination, public hostname)
+                 └─ ngrok agent on the box (outbound-only QUIC)
+                      └─ 127.0.0.1:3333 (host) → jf-shim container :3333
+                           └─ cassandra:9042 (docker network) → jf-cassandra
 ```
 
-Cassandra's native port (9042) is never reachable from outside the box.
+The shim container publishes its port on **127.0.0.1:3333** of the host
+(not 0.0.0.0), so the only way in from outside the box is via the ngrok
+tunnel. Cassandra's native port (9042) is published on the host too but
+**only** because the existing pipeline workers (ingester, fetcher) reach it
+that way; it is firewalled from the public internet.
 
-**Process model:** Cassandra runs as a Docker container managed by `docker compose`
-(see `data-pipeline/SETUP.md`); the shim runs as a *native* systemd service
-(`jobflow-shim`), not in a container. Both processes are local to this box and
-communicate over `127.0.0.1` — no container/host networking concerns.
+**Process model:** Cassandra, Reaper, and the shim all run as Docker
+containers managed by `docker compose` (see `data-pipeline/docker-compose.yml`).
+A single `docker compose up -d` brings up the full data-plane stack.
+ngrok runs as a native systemd service on the host.
+
+---
+
+## Prerequisites
+
+- Docker + docker-compose plugin installed and `docker.service` enabled at boot
+- The repo is cloned at `/home/tomer/jobflow` (adjust paths below if different)
+- ngrok installed as a systemd service forwarding `localhost:3333` to a
+  static `*.ngrok-free.dev` (or paid) hostname; see `data-pipeline/shim/RUNBOOK.md`
+  in the deployment notes for the ngrok unit and config
+- A bearer token shared with JobFlow's Render env (`COMPANY_REGISTRY_TOKEN`)
 
 ---
 
 ## Deploy steps (first-time)
 
-### 1. Prerequisites
-
-- Node ≥ 20.6 on PATH
-- Cassandra running via `docker compose` (see `data-pipeline/SETUP.md`)
-- A public hostname with a DNS A record pointing to the box's WAN IP
-  (the Caddy block in `deploy/Caddyfile` must match this hostname)
-- Port 443 open on the router/firewall; port 3100 is NOT forwarded externally
-
-### 2. Install Node dependencies
+### 1. Create the env file (only one secret)
 
 ```bash
-cd /opt/jobflow/data-pipeline/shim
-npm install --omit=dev
+cd /home/tomer/jobflow/data-pipeline/shim
+cp .env.example .env
+# Generate a strong token:
+NEW_TOKEN=$(openssl rand -hex 32)
+sed -i "s|SHIM_BEARER_TOKEN=change-me|SHIM_BEARER_TOKEN=${NEW_TOKEN}|" .env
+chmod 600 .env
 ```
-
-### 3. Create the env file
-
-```bash
-cp /opt/jobflow/data-pipeline/shim/.env.example /opt/jobflow/data-pipeline/shim/.env
-# Edit .env: set SHIM_BEARER_TOKEN and verify Cassandra vars
-nano /opt/jobflow/data-pipeline/shim/.env
-
-# Lock the env file — it contains SHIM_BEARER_TOKEN.
-sudo chown tomer:tomer /opt/jobflow/data-pipeline/shim/.env
-chmod 600 /opt/jobflow/data-pipeline/shim/.env
-```
-
-Generate a strong token: `openssl rand -hex 32`.
 
 `SHIM_BEARER_TOKEN` must match `COMPANY_REGISTRY_TOKEN` in JobFlow's Render
-environment variables.
+environment variables. All other config (port, Cassandra host, DC, keyspace,
+log level) is defined in `data-pipeline/docker-compose.yml` — do not duplicate
+it into `.env`.
 
-### 4. Install and start the systemd unit
-
-```bash
-sudo cp /opt/jobflow/data-pipeline/shim/deploy/jobflow-shim.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now jobflow-shim
-sudo systemctl status jobflow-shim   # should show "Active: active (running)"
-```
-
-### 5. Install Caddy (if not already present)
+### 2. Build and bring up the shim (alongside Cassandra and Reaper)
 
 ```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update && sudo apt install caddy
+cd /home/tomer/jobflow/data-pipeline
+docker compose up -d --build shim
+# Or to bring up the whole stack including any stopped Cassandra/Reaper:
+# docker compose up -d --build
 ```
 
-### 6. Install the Caddyfile
+Compose will build the shim image, wait for Cassandra to be healthy
+(`depends_on.condition: service_healthy`), then start the container.
+
+### 3. Verify it is running
 
 ```bash
-# Replace YOUR_DOMAIN with the real hostname in the file first
-sudo cp /opt/jobflow/data-pipeline/shim/deploy/Caddyfile /etc/caddy/Caddyfile
-sudo systemctl reload caddy
+docker compose ps          # all containers should be 'running' / 'healthy'
+docker logs jf-shim --tail 20   # expect 'cassandra connected' + 'shim listening'
+
+# Confirm the host-side publish is bound to localhost only (not 0.0.0.0):
+ss -tlnp | grep ':3333'
+# expected: 127.0.0.1:3333 — NOT 0.0.0.0:3333
+
+# Unauthenticated liveness check via ngrok (no bearer required):
+curl -fsS -H 'ngrok-skip-browser-warning: 1' https://YOUR_NGROK_HOST/health
+# expected: {"status":"ok"}
 ```
 
-Caddy will provision a Let's Encrypt cert automatically on first request (or
-at reload time). Check: `sudo journalctl -u caddy -n 30`.
+The `ngrok-skip-browser-warning` header bypasses ngrok's interstitial page,
+which is the browser-warning that ngrok injects for browser-shaped User-Agents.
+Bot-shaped UAs (like curl, undici, node) typically do not trigger it, but
+sending the header is the bulletproof move.
 
 ---
 
 ## Environment variables
 
-| Variable | Required | Default | Description |
+The shim's runtime config splits across **two** sources:
+
+- **`data-pipeline/docker-compose.yml` → `shim.environment`** — non-secret,
+  committed defaults (port, bind address, Cassandra host/DC/keyspace, log level).
+  Override here if you need to change them.
+- **`data-pipeline/shim/.env`** — the one secret (`SHIM_BEARER_TOKEN`).
+  Gitignored. Lock with `chmod 600`.
+
+| Variable | Source | Default | Description |
 |---|---|---|---|
-| `SHIM_PORT` | no | `3100` | Port shim binds on localhost |
-| `SHIM_BEARER_TOKEN` | **yes** | — | Shared secret; must match `COMPANY_REGISTRY_TOKEN` in Render |
-| `CASSANDRA_CONTACT_POINTS` | **yes** | — | Comma-separated host list (e.g. `127.0.0.1`) |
-| `CASSANDRA_LOCAL_DC` | **yes** | — | Cassandra local datacenter name (e.g. `datacenter1`) |
-| `CASSANDRA_KEYSPACE` | no | `jobflow` | Cassandra keyspace |
-| `LOG_LEVEL` | no | `info` | Pino log level (`trace`, `debug`, `info`, `warn`, `error`, `fatal`) |
-| `NODE_ENV` | no | — | Set to `production` to disable pino-pretty |
+| `SHIM_PORT` | compose | `3333` | Port shim binds inside the container |
+| `SHIM_BIND_ADDRESS` | compose | `0.0.0.0` | Bind address (must be 0.0.0.0 inside container so the published port is reachable) |
+| `SHIM_BEARER_TOKEN` | .env | — | Shared secret; must match `COMPANY_REGISTRY_TOKEN` in Render |
+| `CASSANDRA_CONTACT_POINTS` | compose | `cassandra` | Docker service name resolves over the compose network |
+| `CASSANDRA_LOCAL_DC` | compose | `datacenter1` | Cassandra local datacenter name |
+| `CASSANDRA_KEYSPACE` | compose | `jobflow` | Cassandra keyspace |
+| `LOG_LEVEL` | compose | `info` | Pino log level |
+| `NODE_ENV` | compose | `production` | Disables pino-pretty when set to `production` |
 
 ---
 
 ## Rotating the shared secret
 
 1. Generate a new secret: `openssl rand -hex 32`
-2. Update `SHIM_BEARER_TOKEN` in `/opt/jobflow/data-pipeline/shim/.env`
-3. Restart the shim: `sudo systemctl restart jobflow-shim`
+2. Update `SHIM_BEARER_TOKEN` in `/home/tomer/jobflow/data-pipeline/shim/.env`
+3. Restart the shim container: `cd /home/tomer/jobflow/data-pipeline && docker compose restart shim`
 4. Update `COMPANY_REGISTRY_TOKEN` in JobFlow's Render environment variables
 5. Trigger a Render redeploy (env var change auto-triggers it)
 
@@ -126,36 +136,17 @@ the documented future fix is a manual re-trigger admin endpoint.
 
 ---
 
-## Verify it is running
-
-```bash
-# Service status
-sudo systemctl status jobflow-shim
-
-# Tail live logs
-sudo journalctl -u jobflow-shim -f
-
-# Confirm it is bound on localhost only
-ss -tlnp | grep 3100
-# expected: 127.0.0.1:3100 — NOT 0.0.0.0:3100
-
-# Unauthenticated liveness check via Caddy (no bearer required)
-curl -fsS https://YOUR_DOMAIN/health
-# expected: {"status":"ok"}
-```
-
----
-
 ## End-to-end smoke test
 
 Run from any machine with internet access (replace values as needed):
 
 ```bash
-SHIM_URL="https://YOUR_DOMAIN"
+SHIM_URL="https://YOUR_NGROK_HOST"
 TOKEN="your-bearer-token"
+NGROK_HDR=(-H 'ngrok-skip-browser-warning: 1')
 
 # ── Step 1: POST a synthetic Company ─────────────────────────────────────────
-curl -s -X POST "${SHIM_URL}/companies" \
+curl -s -X POST "${SHIM_URL}/companies" "${NGROK_HDR[@]}" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -169,81 +160,54 @@ curl -s -X POST "${SHIM_URL}/companies" \
 # { "company": "smoke-test-co", "results": [{ "org_name": "smoke-test-org", "status": "registered" }] }
 
 # ── Step 2: Confirm row in Cassandra with initialized = false ─────────────────
-# On the Xubuntu box:
-docker exec -it jobflow-cassandra cqlsh -e \
+# On the deploy box (note: container is jf-cassandra, not jobflow-cassandra):
+docker exec -it jf-cassandra cqlsh -e \
   "SELECT company, org_name, active, initialized FROM jobflow.companies WHERE company = 'smoke-test-co';"
 
-# Expected output:
-#  company       | org_name        | active | initialized
-# ---------------+-----------------+--------+-------------
-#  smoke-test-co | smoke-test-org  |   True |       False
+# ── Step 3: Re-POST same body → already_exists ───────────────────────────────
+# (same curl as step 1) → status: 'already_exists'
 
-# ── Step 3: Re-POST the same body → should return already_exists ─────────────
-curl -s -X POST "${SHIM_URL}/companies" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "company": "smoke-test-co",
-    "active_orgs": [
-      { "org_name": "smoke-test-org", "last_repo_push": "2026-05-24T00:00:00Z" }
-    ]
-  }' | jq .
-
-# Expected response:
-# { "company": "smoke-test-co", "results": [{ "org_name": "smoke-test-org", "status": "already_exists" }] }
-
-# ── Step 4: Confirm row is unchanged (initialized still false, not regressed) ─
-docker exec -it jobflow-cassandra cqlsh -e \
-  "SELECT company, org_name, active, initialized FROM jobflow.companies WHERE company = 'smoke-test-co';"
-
-# ── Step 5: Clean up the test row ────────────────────────────────────────────
-docker exec -it jobflow-cassandra cqlsh -e \
+# ── Step 4: Clean up ─────────────────────────────────────────────────────────
+docker exec -it jf-cassandra cqlsh -e \
   "DELETE FROM jobflow.companies WHERE company = 'smoke-test-co' AND org_name = 'smoke-test-org';"
 ```
 
 ### Negative-path smoke checks
 
-The shim should reject malformed or unauthorised requests cleanly. Run these
-once after a fresh deploy to confirm the auth, validation, and method-routing
-paths all behave:
+The shim should reject malformed or unauthorised requests cleanly:
 
 ```bash
 # 401 — wrong token
-curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" \
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" "${NGROK_HDR[@]}" \
   -H "Authorization: Bearer wrong-token" \
   -H "Content-Type: application/json" \
   -d '{"company":"x","active_orgs":[{"org_name":"y","last_repo_push":"2026-01-01T00:00:00Z"}]}'
 # expected: 401
 
 # 400 — invalid JSON body
-curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d 'not-json'
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" "${NGROK_HDR[@]}" \
+  -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -d 'not-json'
 # expected: 400
 
 # 400 — missing required field (last_repo_push)
-curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" "${NGROK_HDR[@]}" \
+  -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
   -d '{"company":"x","active_orgs":[{"org_name":"y"}]}'
 # expected: 400
 
 # 415 — wrong Content-Type
-curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: text/plain" \
-  -d 'whatever'
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" "${NGROK_HDR[@]}" \
+  -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: text/plain" -d 'whatever'
 # expected: 415
 
-# 405 — wrong method on /companies (Caddy rejects before reaching shim)
-curl -sS -o /dev/null -w "%{http_code}\n" -X GET "${SHIM_URL}/companies" \
-  -H "Authorization: Bearer ${TOKEN}"
-# expected: 405
-
-# 404 — unknown path
-curl -sS -o /dev/null -w "%{http_code}\n" "${SHIM_URL}/nope"
+# 404 — unknown path OR unsupported method
+# (Caddy used to return 405 specifically on wrong method against /companies;
+# without Caddy the shim treats all method/path mismatches uniformly as 404.)
+curl -sS -o /dev/null -w "%{http_code}\n" "${SHIM_URL}/nope" "${NGROK_HDR[@]}"
 # expected: 404
+
+curl -sS -o /dev/null -w "%{http_code}\n" -X GET "${SHIM_URL}/companies" "${NGROK_HDR[@]}"
+# expected: 404 (was 405 under Caddy)
 ```
 
 ---
@@ -253,8 +217,14 @@ curl -sS -o /dev/null -w "%{http_code}\n" "${SHIM_URL}/nope"
 If the shim needs to be disabled:
 
 ```bash
-sudo systemctl stop jobflow-shim
-sudo systemctl disable jobflow-shim
+cd /home/tomer/jobflow/data-pipeline
+docker compose stop shim
+```
+
+To stop it from restarting on the next boot too:
+
+```bash
+docker update --restart=no jf-shim
 ```
 
 JobFlow falls back to `LoggingCompanyRegistry` automatically when
@@ -266,7 +236,7 @@ fallback without removing the token.
 
 ## Where logs go
 
-- Shim process logs: `sudo journalctl -u jobflow-shim`
-- Caddy access + TLS logs: `sudo journalctl -u caddy`
-- To persist logs to a file, add `StandardOutput=append:/home/tomer/jobflow-logs/shim.log`
-  to the `[Service]` block in `jobflow-shim.service` and reload systemd.
+- Shim logs: `docker logs jf-shim -f`
+- Cassandra logs: `docker logs jf-cassandra -f`
+- ngrok logs (TLS termination, traffic visibility): `sudo journalctl -u ngrok -f`
+- ngrok also exposes a local web UI at `http://127.0.0.1:4040` (request inspector)

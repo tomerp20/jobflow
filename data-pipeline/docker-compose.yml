@@ -2,6 +2,7 @@ services:
   cassandra:
     image: cassandra:4.1
     container_name: jf-cassandra
+    restart: unless-stopped
     ports:
       - "9042:9042"
       - "7199:7199"  # JMX for Reaper
@@ -27,6 +28,7 @@ services:
   reaper:
     image: thelastpickle/cassandra-reaper:latest
     container_name: jf-reaper
+    restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
@@ -38,6 +40,38 @@ services:
       # defined. Disabling auth is acceptable for a single-host learning
       # deployment behind LAN-only port exposure.
       - REAPER_AUTH_ENABLED=false
+    depends_on:
+      cassandra:
+        condition: service_healthy
+
+  shim:
+    build:
+      context: ./shim
+      dockerfile: Dockerfile
+    image: jobflow-shim:local
+    container_name: jf-shim
+    restart: unless-stopped
+    # The shim is reached from the host via the published port; ngrok runs on
+    # the host and forwards inbound traffic to 127.0.0.1:3333. Inside the
+    # container the process must bind 0.0.0.0 so the published port is
+    # reachable from the host network namespace.
+    ports:
+      - "127.0.0.1:3333:3333"
+    environment:
+      - SHIM_PORT=3333
+      - SHIM_BIND_ADDRESS=0.0.0.0
+      # Cassandra is reached over the docker network by service name. The
+      # shim should never use the host's 127.0.0.1 — that points to itself
+      # from inside the container.
+      - CASSANDRA_CONTACT_POINTS=cassandra
+      - CASSANDRA_LOCAL_DC=datacenter1
+      - CASSANDRA_KEYSPACE=jobflow
+      - LOG_LEVEL=info
+      - NODE_ENV=production
+    env_file:
+      # Only contains SHIM_BEARER_TOKEN (the one secret). Created from
+      # shim/.env.example on first deploy; not committed.
+      - ./shim/.env
     depends_on:
       cassandra:
         condition: service_healthy
