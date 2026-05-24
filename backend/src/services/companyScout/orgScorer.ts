@@ -8,7 +8,7 @@
  * See ADR 0009 for rationale.
  */
 
-import { extractATSSlug, ATS_PLATFORMS } from '../cardService';
+import { extractATSSlug } from '../cardService';
 
 // --------------------------------------------------------------------------
 // Weight constants — single editable place (ADR 0009)
@@ -40,7 +40,7 @@ export interface OrgCandidate {
   name: string | null;
   public_repos: number;
   followers: number;
-  /** When present, repos list is used to compute real-org credibility via repos. */
+  /** When present, non-fork count is used instead of public_repos for credibility scoring. */
   repos?: Array<{ fork: boolean; archived?: boolean }>;
   /**
    * When this candidate is being evaluated as an anchor-prefix sibling
@@ -210,5 +210,3 @@ export function scoreOrgCandidate(
   return score;
 }
 
-// Re-export so that consumers of orgScorer.ts don't also need to import cardService.
-export { extractATSSlug, ATS_PLATFORMS };

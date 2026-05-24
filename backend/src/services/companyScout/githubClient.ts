@@ -47,7 +47,8 @@ async function githubFetch(url: string): Promise<Response | null> {
   if (!env.GITHUB_TOKEN) {
     logger.warn('github_client.no_token', {
       service: 'company-scout',
-      url,
+      // url intentionally omitted — no actionable info when token is simply absent,
+      // and including it would log every company name on the warn path.
       message: 'GITHUB_TOKEN not configured — GitHub API call skipped',
     });
     return null;
@@ -143,7 +144,7 @@ export async function listOrgRepos(login: string): Promise<GitHubRepo[] | null> 
  * Returns null on missing token, rate-limit, HTTP error, or timeout.
  */
 export async function searchOrgs(query: string): Promise<GitHubOrgSearchResult[] | null> {
-  const url = `https://api.github.com/search/users?q=${encodeURIComponent(query)}+type:org&per_page=30`;
+  const url = `https://api.github.com/search/users?q=${encodeURIComponent(query + ' type:org')}&per_page=30`;
   const res = await githubFetch(url);
   if (!res) return null;
   if (!res.ok) return null;
