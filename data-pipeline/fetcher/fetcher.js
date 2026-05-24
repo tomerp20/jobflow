@@ -89,9 +89,9 @@ async function runCatchup(root, log) {
   const limit = pLimit(6);
   let found404 = false;
 
-  // All candidates are enqueued; p-limit starts up to 3 concurrently.
+  // All candidates are enqueued; p-limit starts up to 6 concurrently.
   // The found404 flag prevents new HTTP requests from being issued after the first 404;
-  // any already-in-flight requests are awaited but their results don't extend the walk.
+  // any already-in-flight requests are awaited (up to concurrency-1) but their results don't extend the walk.
   const promises = candidates.map((hourId) =>
     limit(async () => {
       if (found404) return { status: 'skipped-catchup-abort', hourId };

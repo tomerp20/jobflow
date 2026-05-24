@@ -197,7 +197,7 @@ node fetcher.js --catchup                       # from latest-on-disk to now - 2
 
 `--catchup` is what the (deferred) hourly cron will eventually use. It walks back to find the newest file on disk, then fetches forward to `now - 2h` (GH Archive publishes with ~1–2h delay). **Cold start (empty disk) refuses with a clear error and exits 1** — there's no anchor to walk forward from, and a silent fallback could trigger an unintended large download. The user must pass `--hour` or `--range` explicitly to bootstrap. No staleness cap on `--catchup` — if the latest-on-disk is 3 weeks old, all ~500 hours are fetched in this run.
 
-All modes use `p-limit(6)` for download concurrency. Bumped from 3 → 6 after a measured 2× throughput improvement on the target hardware (see issue #237). A `--concurrency N` override can be added later if adaptive concurrency is implemented.
+All modes use `p-limit(6)` for download concurrency. Bumped from 3 → 6 after a measured ~2.2× throughput improvement on the target hardware (see issue #237). A `--concurrency N` CLI override can be added later for large manual backfills or if adaptive concurrency is implemented.
 
 ---
 
