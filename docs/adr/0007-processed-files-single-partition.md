@@ -28,13 +28,21 @@ CREATE TABLE processed_files (
 ) WITH CLUSTERING ORDER BY (file_name DESC);
 ```
 
-Catchup query becomes a single round-trip:
+Catchup query becomes a single round-trip (paged scan of the singleton partition):
 
 ```cql
-SELECT file_name FROM processed_files WHERE bucket='singleton' LIMIT 1;
+SELECT file_name FROM processed_files WHERE bucket='singleton';
 ```
 
-Catchup logic becomes: `pending = ondisk.filter(id > max)` (lexicographic, works because `file_name` format is `YYYY-MM-DD-HH`).
+The chronological max is computed in JS via `hourIdToMs()`. Catchup logic becomes:
+`pending = ondisk.filter(id => hourIdToMs(id) > hourIdToMs(max))`.
+
+A `LIMIT 1` plus lexicographic ordering does **not** work because the canonical
+hour ID format is `YYYY-MM-DD-H` (hour unpadded, 0–23) — string compare yields
+`'2025-05-01-9' > '2025-05-01-10'`, which would silently skip 14 of every 24
+hours per day. Computing the max chronologically via `hourIdToMs` avoids this.
+Scanning the whole partition stays cheap because it is bounded (~9k rows/year of
+hourly ingest; ~26k after 3 years) and is a single paged round-trip.
 
 The `event_count` and `filtered_count` columns from the original schema are dropped — they were never read back, only written for ad-hoc observability.
 

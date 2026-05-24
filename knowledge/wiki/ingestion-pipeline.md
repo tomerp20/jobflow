@@ -32,7 +32,7 @@ The data-acquisition + ingestion subsystem of the [[cassandra-analytics-pipeline
 
 ## Where idempotency lives
 
-- **Hourly** uses `processed_files` (single-partition shape: `(bucket='singleton', file_name)` PK, `CLUSTERING ORDER BY (file_name DESC)`) → see [[adr-0007-processed-files-single-partition]] (supersedes schema section of [[adr-0005-processed-files-hourly-only]]).
+- **Hourly** uses `processed_files` (single-partition shape: `(bucket='singleton', file_name)` PK; chronological max computed in JS via `hourIdToMs` because `file_name`'s hour component is unpadded — see below) → see [[adr-0007-processed-files-single-partition]] (supersedes schema section of [[adr-0005-processed-files-hourly-only]]).
 - **Backfill** uses `backfill_progress` (per-date) → re-reads 24 files per resumed date.
 - Both rely on Cassandra full-key upserts on `company_events` → no duplicate rows even on overlapping writes.
 
@@ -42,9 +42,9 @@ The `--verb catchup` ingester verb is used by the hourly orchestrator after a ga
 
 **Old design (crashed production):** `Promise.all(allOnDisk.map(id => isFileProcessed(id)))` — N concurrent SELECTs. Crashed at 3,426 files (`BusyConnectionError: 2048 requests in-flight`).
 
-**New design (O(1)):**
-1. `getMaxProcessedFile()` → `SELECT file_name FROM processed_files WHERE bucket='singleton' LIMIT 1` — returns the highest file name ever processed (or `null` if empty).
-2. Filter: `pending = allOnDisk.filter(id => id > max)` — lexicographic compare works because `file_name` format is `YYYY-MM-DD-HH`.
+**New design (one round-trip):**
+1. `getMaxProcessedFile()` → `SELECT file_name FROM processed_files WHERE bucket='singleton'` — single paged scan of the singleton partition; chronological max computed in JS via `hourIdToMs()`. Returns `null` if empty.
+2. Filter: `pending = allOnDisk.filter(id => hourIdToMs(id) > hourIdToMs(max))` — must be chronological compare, not lexicographic. The canonical `file_name` format is `YYYY-MM-DD-H` (hour unpadded, 0–23), so string compare would silently skip hours 10–23 of each day once hour 9 is processed.
 3. The pre-filter means `processHour()` skips the per-file idempotency check for catchup (`cmd.verb !== 'catchup'` guard).
 
 ## Argument hygiene
