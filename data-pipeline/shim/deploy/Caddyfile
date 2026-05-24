@@ -1,0 +1,27 @@
+# Caddyfile for the JobFlow Cassandra write shim.
+#
+# Replace YOUR_DOMAIN with the actual public hostname (e.g. shim.example.com).
+# Caddy automatically obtains and renews a Let's Encrypt TLS certificate
+# for this domain — no certbot, no cron, no manual renewal required.
+#
+# Install Caddy on Ubuntu: https://caddyserver.com/docs/install#debian-ubuntu-raspbian
+#   sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+#   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+#   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+#   sudo apt update && sudo apt install caddy
+#
+# Place this file at /etc/caddy/Caddyfile and run: sudo systemctl reload caddy
+#
+# The shim binds on 127.0.0.1:3100 (SHIM_PORT). Adjust the upstream port here
+# if SHIM_PORT is changed in shim/.env.
+
+YOUR_DOMAIN {
+    # Only the Company Scout write endpoint is exposed.
+    @companies path /companies
+    route @companies {
+        reverse_proxy 127.0.0.1:3100
+    }
+
+    # Reject everything else at the proxy layer before it reaches the shim.
+    respond 404
+}

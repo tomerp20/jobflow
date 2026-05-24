@@ -1,0 +1,43 @@
+# systemd unit for the JobFlow Cassandra write shim.
+#
+# Install:
+#   sudo cp jobflow-shim.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now jobflow-shim
+#
+# The service reads its config from /opt/jobflow/data-pipeline/shim/.env via
+# EnvironmentFile. Create that file from shim/.env.example before enabling.
+#
+# Assumes the repo is cloned at /opt/jobflow and Node ≥ 20.6 is installed.
+# Adjust WorkingDirectory and ExecStart paths if the repo lives elsewhere.
+
+[Unit]
+Description=JobFlow Cassandra write shim
+Documentation=https://github.com/tomerp20/jobflow
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=tomer
+Group=tomer
+WorkingDirectory=/opt/jobflow/data-pipeline/shim
+
+# Env file created from shim/.env.example — not committed.
+EnvironmentFile=/opt/jobflow/data-pipeline/shim/.env
+
+ExecStart=/usr/bin/node shim.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jobflow-shim
+
+# Hardening: shim binds only to 127.0.0.1 and makes no outbound calls
+# beyond Cassandra on localhost; restrict network to localhost only.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
