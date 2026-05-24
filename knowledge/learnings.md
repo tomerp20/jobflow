@@ -13,6 +13,10 @@ Each entry: **what happened → what we'd change**. Skip generic platitudes.
 
 ---
 
+## 2026-05-24 (PR #244 — Company Scout slice 1)
+
+- **Global dedup in `createCard` must use the base `db` instance, not the caller's `trx`.** The First Sighting check queries `cards.company_name` globally across all users; using `runner` (which may be a `trx`) would scope the read to uncommitted rows inside the current transaction, making concurrent creates race past the dedup. → Always use `db` (not `runner`/`trx`) for reads that need committed global state even when the surrounding write uses a transaction.
+
 ## 2026-05-24 (PR #242 — fetcher p-limit bump)
 
 - **File size varies ~3× across different months of GH Archive.** Jan 2025 files averaged ~77 MB/hour vs ~25 MB for May 2026 — GitHub event volume grew significantly. When benchmarking fetcher throughput, files/sec is a misleading metric across different date ranges; MB/s is the correct comparison. The p-limit(3→6) bump yielded ~2.2× MB/s improvement (71 vs 33 MB/s) on the Xubuntu box, clearing the >1.3× approval threshold.

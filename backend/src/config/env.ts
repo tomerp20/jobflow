@@ -21,11 +21,23 @@ const schema = z.object({
   LLM_PROVIDER:         z.enum(['anthropic', 'google']).default('google'),
   ANTHROPIC_API_KEY:    z.string().optional(),
   GOOGLE_AI_API_KEY:    z.string().optional(),
+
+  GITHUB_TOKEN:            z.string().optional(),
+  COMPANY_REGISTRY_URL:    z.string().url().optional(),
+  COMPANY_REGISTRY_TOKEN:  z.string().optional(),
 }).superRefine((v, ctx) => {
   if (v.NODE_ENV !== 'production') return;
 
   for (const k of ['GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REDIRECT_URI','CRON_API_KEY'] as const) {
     if (!v[k]) ctx.addIssue({ code: 'custom', path: [k], message: `${k} is required in production` });
+  }
+
+  for (const k of ['GITHUB_TOKEN','COMPANY_REGISTRY_URL','COMPANY_REGISTRY_TOKEN'] as const) {
+    if (!v[k]) ctx.addIssue({ code: 'custom', path: [k], message: `${k} is required in production` });
+  }
+
+  if (v.COMPANY_REGISTRY_URL && !v.COMPANY_REGISTRY_TOKEN) {
+    ctx.addIssue({ code: 'custom', path: ['COMPANY_REGISTRY_TOKEN'], message: 'COMPANY_REGISTRY_TOKEN is required when COMPANY_REGISTRY_URL is set' });
   }
 
   for (const [k, defaultVal] of [
