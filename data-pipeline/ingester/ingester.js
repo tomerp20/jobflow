@@ -182,6 +182,18 @@ async function processHourBatch(orderedHourIds) {
   // Per-hour state.
   // inFlightByHour: count of events for this hour that have been handed to the writer
   //                 but whose write promise hasn't settled yet.
+  //
+  // NOTE on durability semantics — DO NOT remove without revisiting tryFinalize below:
+  //   - hourly mode: `writer.writeEvent`'s promise resolves only on actual Cassandra write
+  //     success, so inFlightByHour accurately gates `markFileProcessed`.
+  //   - backfill mode: `writer.addBackfillEvent` returns Promise.resolve() once the event
+  //     is buffered in cassandra-writer's per-partition batch, NOT once it lands in
+  //     Cassandra. The per-hour finalize log here is therefore "events accounted for",
+  //     not "events durable". Durability is enforced at the date boundary via
+  //     `flushAllPartitionBuffers` + `writeBackfillProgress` in the outer loop.
+  //     If a future change adds `markFileProcessed` (or any per-hour durability marker)
+  //     to the backfill branch below, it MUST first await a flush — otherwise resume
+  //     semantics will silently corrupt on a mid-date crash.
   const inFlightByHour = new Map();
   const dispatchedAll = new Set();              // worker has emitted fileDone for this hour
   const statsByHour = new Map();                // {totalEmitted, droppedNoTimestamp, droppedNoId}
@@ -248,9 +260,12 @@ async function processHourBatch(orderedHourIds) {
 
           const stats = statsByHour.get(h) ?? { totalEmitted: 0, droppedNoTimestamp: 0, droppedNoId: 0 };
           totalEventsEmittedAcrossHours += stats.totalEmitted;
+          // In hourly mode this log line precedes a durable `markFileProcessed` write below.
+          // In backfill mode the events may still be sitting in cassandra-writer per-partition
+          // buffers — durability is deferred to the date-level `flushAllPartitionBuffers`.
           logger.info(
             { hourId: h, totalEmitted: stats.totalEmitted, droppedNoTimestamp: stats.droppedNoTimestamp, droppedNoId: stats.droppedNoId },
-            'hour complete'
+            cmd.mode === 'hourly' ? 'hour complete' : 'hour buffered — durability deferred to date flush'
           );
           if (cmd.mode === 'hourly') {
             try {
@@ -291,13 +306,15 @@ async function processHourBatch(orderedHourIds) {
           const p = cmd.mode === 'backfill'
             ? writer.addBackfillEvent(event)
             : writer.writeEvent(event);
+          // The matching `inFlightByHour.set(hourId, current + 1)` above guarantees
+          // the key exists by the time these callbacks fire; no `??` fallback needed.
           p.then(() => {
-            inFlightByHour.set(hourId, (inFlightByHour.get(hourId) ?? 1) - 1);
+            inFlightByHour.set(hourId, inFlightByHour.get(hourId) - 1);
             totalInFlight--;
             if (totalInFlight < INFLIGHT_HIGH_WATERMARK) tryDispatch();
             tryFinalize();
           }).catch((err) => {
-            inFlightByHour.set(hourId, (inFlightByHour.get(hourId) ?? 1) - 1);
+            inFlightByHour.set(hourId, inFlightByHour.get(hourId) - 1);
             totalInFlight--;
             if (!writeError) {
               const partitionKey = err.partitionKey ?? `${event.company}/${event.year_month}`;

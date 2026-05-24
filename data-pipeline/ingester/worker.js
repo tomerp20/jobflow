@@ -17,11 +17,12 @@ const ALLOWED_TYPES = new Set(['PushEvent', 'PullRequestEvent', 'IssuesEvent', '
 // without ballooning main-thread Cassandra dispatch latency.
 const EVENT_BATCH_SIZE = 500;
 
+// The only message the worker accepts is `processFile`. Shutdown is driven by
+// the main thread calling `worker.terminate()` directly (see ingester.js), so
+// there is no graceful-shutdown channel here.
 parentPort.on('message', async (msg) => {
   if (msg?.type === 'processFile') {
     await processFile(msg.hourId, msg.filePath);
-  } else if (msg?.type === 'shutdown') {
-    process.exit(0);
   }
 });
 
