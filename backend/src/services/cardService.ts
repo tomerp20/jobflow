@@ -2,6 +2,7 @@ import { Knex } from 'knex';
 import db from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { shiftUp, shiftDown, withTransaction } from '../util/positions';
+import { runCompanyCheck } from './companyScout/companyScout';
 
 export interface CardFilters {
   stage?: string;
@@ -270,6 +271,16 @@ export const cardService = {
       position = (maxPos?.max ?? -1) + 1;
     }
 
+    // First Sighting check: global dedup across all users, case-insensitive,
+    // whitespace-trimmed. We use the base db instance (not runner/trx) so this
+    // read sees already-committed rows from other users — a trx-scoped read
+    // would miss cards committed outside this transaction.
+    const normalizedCompany = data.company_name.trim().toLowerCase();
+    const existingCompany = await db('cards')
+      .whereRaw('lower(trim(company_name)) = ?', [normalizedCompany])
+      .first();
+    const isFirstSighting = !existingCompany;
+
     // Caller may pre-resolve the icon URL (e.g. gmailSync resolves it outside
     // its per-email transaction to avoid holding a DB connection across the
     // Clearbit HTTP call). Detect presence with `in` so an explicit `null` is
@@ -308,6 +319,15 @@ export const cardService = {
       .returning('*');
 
     await logActivity(card.id, userId, 'created', undefined, undefined, undefined, undefined, runner);
+
+    if (isFirstSighting) {
+      // Fire detached — never await, never let a thrown error propagate.
+      // Card-creation latency must be unaffected by the Scout.
+      runCompanyCheck(data.company_name, {
+        applicationUrl: data.application_url,
+        careersUrl: data.careers_url,
+      }).catch(() => { /* intentionally suppressed — Scout errors must not fail card creation */ });
+    }
 
     // Return card with stage name
     const stage = await runner('stages').where({ id: card.stage_id }).first();
