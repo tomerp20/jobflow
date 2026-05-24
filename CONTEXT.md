@@ -37,11 +37,11 @@ An email sent by a company to acknowledge that they received a job application. 
 _Avoid_: Application confirmation, Acknowledgement email, Receipt email
 
 **Company Scout**:
-An automated process that runs on a Company's First Sighting. It resolves the Company to every public GitHub organization that belongs to it (a Company may legitimately own multiple Orgs — e.g. `wix`, `wix-incubator`) and classifies whether the Company has an Active GitHub Presence. It writes the resolved Orgs to the JobFlow Analytics system's `companies` table (one row per Company–Org pair); it produces no Notification and no user-facing change. A sibling of the Email Agent — an automated process acting on Applications — but triggered by Company novelty rather than by email.
+An automated process that runs on a Company's First Sighting. It enumerates candidate public GitHub organizations for the Company, scores each candidate against a weighted rubric, and writes those that pass the acceptance threshold and have an Active GitHub Presence to the JobFlow Analytics system's `companies` table — one row per (Company, Org) pair (a Company may legitimately own multiple Orgs, e.g. `wix`, `wix-incubator`). It produces no Notification and no user-facing change. A sibling of the Email Agent — an automated process acting on Applications — but triggered by Company novelty rather than by email.
 _Avoid_: Company Profiler, GitHub Checker, Company Agent
 
 **Active GitHub Presence**:
-The classification the Company Scout assigns to a Company: at least one of the Company's resolved GitHub organizations has at least one public repository that is not a fork, not archived, and was pushed to within the last year. A Company with no resolvable organizations, or whose repositories across all resolved Orgs are all older, forks, or archived, does not have an Active GitHub Presence.
+A per-Org classification the Company Scout assigns to each resolved GitHub organization: the Org has an Active GitHub Presence if it has at least one public repository that is not a fork, not archived, and was pushed to within the last year. Only Orgs with an Active GitHub Presence are written to the JobFlow Analytics system. By extension, a Company has an Active GitHub Presence if at least one of its resolved Orgs does.
 _Avoid_: Active repos, Live org
 
 **Org**:
@@ -96,7 +96,8 @@ _Avoid_: Todo (internal/DB term), Checklist item
 - The **Email Agent** produces **Notifications** to inform the user of every automated action it takes
 - A **Task** may optionally be linked to an **Application**; a **Task** without a link is standalone
 - The **First Sighting** of a **Company** on a new **Application** triggers the **Company Scout**
-- The **Company Scout** classifies a **Company** as having an **Active GitHub Presence** or not, and reports the ones that do to the JobFlow Analytics system
+- The **Company Scout** resolves a **Company** to zero or more candidate **Orgs**, scores each candidate, and admits those above the acceptance threshold
+- The **Company Scout** classifies each admitted **Org** as having an **Active GitHub Presence** or not, and writes only the active ones to the JobFlow Analytics system's `companies` table — one row per (Company, Org) pair
 
 ## Example dialogue
 
