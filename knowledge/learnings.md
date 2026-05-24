@@ -13,6 +13,12 @@ Each entry: **what happened → what we'd change**. Skip generic platitudes.
 
 ---
 
+## 2026-05-24 (PR #247 — Company Scout slice 2)
+
+- **OrgScorer calibration: exact-slug-only orgs naturally stay below threshold without threshold tuning.** Small/unknown orgs that happen to have an exact slug match (e.g. `faye`, `rise`) score only 50 (exact slug +50 but no credibility signals). Real anchor orgs score 85–120 because they have followers ≥100 (+10) and repos ≥5 (+10) plus display-name match. No weight adjustment was needed on first implementation — the ADR 0009 starting weights were correct. → Trust the rubric's credibility signals to do the disambiguation work; don't inflate the threshold to compensate for calibration failures you haven't yet measured.
+- **Worktrees vs main checkout: write files into the right tree.** When a worktree exists at `.claude/worktrees/<name>`, edits to `/Users/itc/Desktop/jobflow/...` go into the main checkout (a different git working tree), not the worktree. Always verify which git working tree a path resolves to before writing implementation files; use the worktree's absolute path explicitly.
+- **`git stash`+`stash pop` in the main checkout can silently switch that checkout's branch state** when background agents or stash operations touch it mid-session. The worktree is isolated from this, but writing files to the main checkout path while it's been stash-popped to a different branch creates confusion. Prefer writing to worktree paths directly and avoid touching the main checkout during a worktree-based ship.
+
 ## 2026-05-24 (PR #244 — Company Scout slice 1)
 
 - **Global dedup in `createCard` must use the base `db` instance, not the caller's `trx`.** The First Sighting check queries `cards.company_name` globally across all users; using `runner` (which may be a `trx`) would scope the read to uncommitted rows inside the current transaction, making concurrent creates race past the dedup. → Always use `db` (not `runner`/`trx`) for reads that need committed global state even when the surrounding write uses a transaction.
