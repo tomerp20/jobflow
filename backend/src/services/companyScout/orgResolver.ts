@@ -117,7 +117,10 @@ export async function resolveOrgs(
     probed.add(slug);
 
     const org = await getOrg(slug);
-    if (!org) continue; // 404, rate-limit, or timeout — skip
+    if (!org) continue;
+    // Also mark the canonical login so Pass 2/3 don't re-fetch the same org
+    // under a different capitalisation form.
+    probed.add(org.login); // 404, rate-limit, or timeout — skip
 
     const candidate = toCandidate(org);
     const score = scoreOrgCandidate(company, candidate, urlList);
