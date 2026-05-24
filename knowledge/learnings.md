@@ -30,6 +30,11 @@ Each entry: **what happened → what we'd change**. Skip generic platitudes.
 
 - **Global dedup in `createCard` must use the base `db` instance, not the caller's `trx`.** The First Sighting check queries `cards.company_name` globally across all users; using `runner` (which may be a `trx`) would scope the read to uncommitted rows inside the current transaction, making concurrent creates race past the dedup. → Always use `db` (not `runner`/`trx`) for reads that need committed global state even when the surrounding write uses a transaction.
 
+## 2026-05-24 (PR #250 — Cassandra write shim)
+
+- **Caddy beats nginx for a single-endpoint HTTPS shim with no existing infra dependency.** Caddy provisions and renews Let's Encrypt certs automatically; the Caddyfile for "one route, reverse-proxy to localhost" is ~15 lines vs ~40 for a minimal nginx block. When the choice is unconstrained, Caddy is lower ongoing ops burden. → Use Caddy as the default reverse-proxy for new services on the Linux box; document nginx only if a service joins existing nginx infra.
+- **LWT `[applied]` column access in cassandra-driver:** the driver returns the LWT applied column as `rows[0]['[applied]']` (bracket notation, not `.applied`). Must access with bracket syntax or the value is undefined.
+
 ## 2026-05-24 (PR #242 — fetcher p-limit bump)
 
 - **File size varies ~3× across different months of GH Archive.** Jan 2025 files averaged ~77 MB/hour vs ~25 MB for May 2026 — GitHub event volume grew significantly. When benchmarking fetcher throughput, files/sec is a misleading metric across different date ranges; MB/s is the correct comparison. The p-limit(3→6) bump yielded ~2.2× MB/s improvement (71 vs 33 MB/s) on the Xubuntu box, clearing the >1.3× approval threshold.
