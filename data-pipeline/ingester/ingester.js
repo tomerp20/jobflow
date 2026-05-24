@@ -189,6 +189,7 @@ async function processHourBatch(orderedHourIds) {
   let totalEventsEmittedAcrossHours = 0;        // accumulator for return value
 
   let totalInFlight = 0;
+  let busyWorkers = 0;   // dispatched but not yet returned (fileDone, workerError, or hard crash)
   let writeError = null;
 
   let resolveDone, rejectDone;
@@ -205,6 +206,7 @@ async function processHourBatch(orderedHourIds) {
       const hourId = pendingHours.shift();
       const filePath = hourIdToPath(GHARCHIVE_DIR, hourId);
       inFlightByHour.set(hourId, 0);
+      busyWorkers++;
       logger.info({ hourId, filePath, worker: worker.threadId }, 'dispatching file to worker');
       worker.postMessage({ type: 'processFile', hourId, filePath });
     }
@@ -213,9 +215,11 @@ async function processHourBatch(orderedHourIds) {
 
   function checkTerminalCondition() {
     if (writeError) {
-      // Wait until all in-flight writes settle AND every busy worker has either
-      // emitted fileDone or workerError (i.e. is back in readyWorkers).
-      if (totalInFlight === 0 && readyWorkers.length === workerPool.length) {
+      // Wait until all in-flight writes settle AND every dispatched worker has
+      // returned (via fileDone, workerError, or hard crash). Using busyWorkers
+      // rather than readyWorkers.length so a hard-crashed worker (which is not
+      // returned to the pool) still counts toward the quorum.
+      if (totalInFlight === 0 && busyWorkers === 0) {
         rejectDone(writeError);
       }
       return;
@@ -314,6 +318,7 @@ async function processHourBatch(orderedHourIds) {
           droppedNoId: msg.droppedNoId,
         });
         dispatchedAll.add(msg.hourId);
+        busyWorkers--;
         readyWorkers.push(worker);
         tryDispatch();
         tryFinalize();
@@ -321,6 +326,7 @@ async function processHourBatch(orderedHourIds) {
         logger.error({ hourId: msg.hourId, err: msg.message }, 'worker failed on file');
         const err = new Error(`worker error on ${msg.hourId}: ${msg.message}`);
         recordWriteError(err);
+        busyWorkers--;
         readyWorkers.push(worker);
         checkTerminalCondition();
       }
@@ -329,6 +335,7 @@ async function processHourBatch(orderedHourIds) {
     worker.on('error', (err) => {
       logger.error({ err: err.message }, 'worker thread errored');
       recordWriteError(err);
+      busyWorkers--;
       // The worker is gone; do not return it to readyWorkers.
       checkTerminalCondition();
     });
