@@ -39,7 +39,7 @@ export class CassandraWriter {
     this._limit = null;
     this._insertCql = null;
     this._processedFilesInsertCql = null;
-    this._processedFilesSelectCql = null;
+    this._processedFilesMaxCql = null;
     this._backfillProgressInsertCql = null;
 
     // Partition write rate tracking
@@ -56,11 +56,11 @@ export class CassandraWriter {
       `INSERT INTO ${this._keyspace}.company_events
          (company, org_name, year_month, event_time, event_id, event_type, repo_name, actor_login, is_ai, tech_tags)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-    this._processedFilesSelectCql =
-      `SELECT file_name FROM ${this._keyspace}.processed_files WHERE file_name = ?`;
+    this._processedFilesMaxCql =
+      `SELECT file_name FROM ${this._keyspace}.processed_files WHERE bucket = ? LIMIT 1`;
     this._processedFilesInsertCql =
-      `INSERT INTO ${this._keyspace}.processed_files (file_name, processed_at, event_count, filtered_count)
-       VALUES (?, ?, ?, ?)`;
+      `INSERT INTO ${this._keyspace}.processed_files (bucket, file_name, processed_at)
+       VALUES (?, ?, ?)`;
     this._backfillProgressInsertCql =
       `INSERT INTO ${this._keyspace}.backfill_progress (run_id, date, status, completed_at, events_written)
        VALUES (?, ?, ?, ?, ?)`;
@@ -87,9 +87,9 @@ export class CassandraWriter {
     if (this._rateTimer) clearInterval(this._rateTimer);
   }
 
-  async isFileProcessed(fileName) {
-    const result = await this._client.execute(this._processedFilesSelectCql, [fileName], { prepare: true });
-    return result.rowLength > 0;
+  async getMaxProcessedFile() {
+    const result = await this._client.execute(this._processedFilesMaxCql, ['singleton'], { prepare: true });
+    return result.rowLength > 0 ? result.rows[0].file_name : null;
   }
 
   async writeEvent(event) {
@@ -208,10 +208,10 @@ export class CassandraWriter {
     }
   }
 
-  async markFileProcessed(fileName, eventCount, filteredCount) {
+  async markFileProcessed(fileName) {
     await this._client.execute(
       this._processedFilesInsertCql,
-      [fileName, new Date(), eventCount, filteredCount],
+      ['singleton', fileName, new Date()],
       { prepare: true }
     );
   }

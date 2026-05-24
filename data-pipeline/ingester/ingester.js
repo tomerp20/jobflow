@@ -80,15 +80,15 @@ if (cmd.verb === 'hour') {
 } else if (cmd.verb === 'range') {
   hourIds = enumerateRange(cmd.start, cmd.end);
 } else if (cmd.verb === 'catchup') {
-  // catchup: walk disk, skip files already recorded in processed_files
+  // catchup: walk disk, find all hours after the highest already-processed hour
   const allOnDisk = enumerateAllOnDisk(GHARCHIVE_DIR);
   if (allOnDisk.length === 0) {
     logger.warn('no files in GHARCHIVE_DIR');
     await writer.shutdown();
     process.exit(0);
   }
-  const processedFlags = await Promise.all(allOnDisk.map(id => writer.isFileProcessed(id)));
-  const pending = allOnDisk.filter((_, i) => !processedFlags[i]);
+  const maxProcessed = await writer.getMaxProcessedFile();
+  const pending = maxProcessed ? allOnDisk.filter(id => id > maxProcessed) : allOnDisk;
   const alreadyProcessed = allOnDisk.length - pending.length;
   logger.info(
     { total: allOnDisk.length, alreadyProcessed, toProcess: pending.length },
@@ -156,10 +156,11 @@ process.exit(exitCode);
 async function processHour(hourId) {
   const filePath = hourIdToPath(GHARCHIVE_DIR, hourId);
 
-  // In --mode hourly: check processed_files for idempotency
-  if (cmd.mode === 'hourly') {
-    const alreadyDone = await writer.isFileProcessed(hourId);
-    if (alreadyDone) {
+  // In --mode hourly: check processed_files for idempotency.
+  // Catchup pre-filters to only unprocessed hours, so skip the query there.
+  if (cmd.mode === 'hourly' && cmd.verb !== 'catchup') {
+    const maxProcessed = await writer.getMaxProcessedFile();
+    if (maxProcessed !== null && hourId <= maxProcessed) {
       logger.info({ hourId }, 'already processed, skipping');
       return 0;
     }
@@ -294,7 +295,7 @@ async function processHour(hourId) {
 
   // In --mode hourly: mark file processed
   if (cmd.mode === 'hourly') {
-    await writer.markFileProcessed(hourId, totalParsed, totalFiltered);
+    await writer.markFileProcessed(hourId);
     logger.info({ hourId }, 'processed_files row written');
   }
 
