@@ -11,7 +11,7 @@ sources:
 related: [[application]] [[company]] [[first-sighting]] [[org]] [[active-github-presence]] [[cassandra-analytics-pipeline]] [[backfill]] [[hourly-ingest]] [[email-agent]] [[adr-0003-backfill-hourly-relay-race]] [[adr-0009-org-scorer-weighted-scoring]] [[adr-0010-https-shim-write-path]]
 updated: 2026-05-24
 status: stable
-shipped: "#181 (slice 1)"
+shipped: "#181 (slice 1), #182 (slice 2 — PR #247)"
 ---
 
 # Company Scout
@@ -56,7 +56,7 @@ The analytics pipeline can't profile a Company until its `(Company, Org)` rows e
   - Company adds a new Org months later → Scout doesn't re-evaluate; the new Org is never registered.
   - All cards for a Company are deleted then a new one is added → Scout fires again; previously-registered Orgs return `already_exists` from the shim (safe).
 - **`active` column in `companies` is effectively always `true` in v1.** Only active Orgs are written, so the column never carries a `false` value through this path. The schema retains it for future flexibility; no v1 change.
-- **The OrgScorer is uncalibrated until implementation.** The 80-point threshold is a starting point; calibration against the existing ~74-Company dataset happens once during implementation and is then frozen unless drift is observed.
+- **OrgScorer calibration result (slice 2).** No weight tuning was needed. Under the ADR 0009 starting weights: Wix→wix (85), Tenable→tenable (120), Salesforce→salesforce (120) all pass ≥80; Riverside→Riverside-Software (40), Faye→faye (50), Rise→rise (50) all reject <80. The key mechanism: exact slug (+50) alone doesn't clear the threshold — the credibility signals (repos +10, followers +10) and display-name match together push anchors over 80, while small/unknown orgs with only an exact slug hit stay at 50.
 
 ## Open questions
 
@@ -67,7 +67,8 @@ The analytics pipeline can't profile a Company until its `(Company, Org)` rows e
 
 - Trigger site: `backend/src/services/cardService.ts` (in `createCard`)
 - Scout orchestrator: `backend/src/services/companyScout/companyScout.ts` (skeleton — slice 1); `companyRegistry.ts` (LoggingCompanyRegistry — slice 1)
-- OrgScorer module: `backend/src/services/companyScout/orgScorer.ts` (planned — slice 2/3)
+- GitHub API client: `backend/src/services/companyScout/githubClient.ts` (shipped — slice 2 / PR #247)
+- OrgScorer module: `backend/src/services/companyScout/orgScorer.ts` (shipped — slice 2 / PR #247)
 - HTTPS shim: separate deliverable in `data-pipeline/` repo (not in JobFlow)
 - Cassandra schema: `data-pipeline/schema/004_companies.cql` + `005_alter_companies_initialized.cql`
 - Canonical pipeline design: `docs/CassandraPlan.md` §4.4 (`companies` table)
