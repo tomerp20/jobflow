@@ -20,6 +20,11 @@ Render (JobFlow)
 
 Cassandra's native port (9042) is never reachable from outside the box.
 
+**Process model:** Cassandra runs as a Docker container managed by `docker compose`
+(see `data-pipeline/SETUP.md`); the shim runs as a *native* systemd service
+(`jobflow-shim`), not in a container. Both processes are local to this box and
+communicate over `127.0.0.1` — no container/host networking concerns.
+
 ---
 
 ## Deploy steps (first-time)
@@ -45,7 +50,13 @@ npm install --omit=dev
 cp /opt/jobflow/data-pipeline/shim/.env.example /opt/jobflow/data-pipeline/shim/.env
 # Edit .env: set SHIM_BEARER_TOKEN and verify Cassandra vars
 nano /opt/jobflow/data-pipeline/shim/.env
+
+# Lock the env file — it contains SHIM_BEARER_TOKEN.
+sudo chown tomer:tomer /opt/jobflow/data-pipeline/shim/.env
+chmod 600 /opt/jobflow/data-pipeline/shim/.env
 ```
+
+Generate a strong token: `openssl rand -hex 32`.
 
 `SHIM_BEARER_TOKEN` must match `COMPANY_REGISTRY_TOKEN` in JobFlow's Render
 environment variables.
@@ -106,9 +117,12 @@ at reload time). Check: `sudo journalctl -u caddy -n 30`.
 5. Trigger a Render redeploy (env var change auto-triggers it)
 
 Both sides must be updated atomically in terms of effect — there is a brief
-window while Render is restarting where Scout writes will fail (JobFlow returns
-a log line from `LoggingCompanyRegistry`). This is acceptable for the v1
-write volume.
+window while Render is restarting where Scout writes will fail. **The Company
+Scout has no retry**: per `knowledge/wiki/company-scout.md` (Surprises /
+gotchas), any First Sighting that hits the shim during this window is silently
+un-registered until the same Company is sighted again. For v1 the write volume
+is sparse enough that this gap is acceptable; if it becomes a real problem,
+the documented future fix is a manual re-trigger admin endpoint.
 
 ---
 
@@ -124,6 +138,10 @@ sudo journalctl -u jobflow-shim -f
 # Confirm it is bound on localhost only
 ss -tlnp | grep 3100
 # expected: 127.0.0.1:3100 — NOT 0.0.0.0:3100
+
+# Unauthenticated liveness check via Caddy (no bearer required)
+curl -fsS https://YOUR_DOMAIN/health
+# expected: {"status":"ok"}
 ```
 
 ---
@@ -181,6 +199,51 @@ docker exec -it jobflow-cassandra cqlsh -e \
 # ── Step 5: Clean up the test row ────────────────────────────────────────────
 docker exec -it jobflow-cassandra cqlsh -e \
   "DELETE FROM jobflow.companies WHERE company = 'smoke-test-co' AND org_name = 'smoke-test-org';"
+```
+
+### Negative-path smoke checks
+
+The shim should reject malformed or unauthorised requests cleanly. Run these
+once after a fresh deploy to confirm the auth, validation, and method-routing
+paths all behave:
+
+```bash
+# 401 — wrong token
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" \
+  -H "Authorization: Bearer wrong-token" \
+  -H "Content-Type: application/json" \
+  -d '{"company":"x","active_orgs":[{"org_name":"y","last_repo_push":"2026-01-01T00:00:00Z"}]}'
+# expected: 401
+
+# 400 — invalid JSON body
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d 'not-json'
+# expected: 400
+
+# 400 — missing required field (last_repo_push)
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"company":"x","active_orgs":[{"org_name":"y"}]}'
+# expected: 400
+
+# 415 — wrong Content-Type
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/companies" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: text/plain" \
+  -d 'whatever'
+# expected: 415
+
+# 405 — wrong method on /companies (Caddy rejects before reaching shim)
+curl -sS -o /dev/null -w "%{http_code}\n" -X GET "${SHIM_URL}/companies" \
+  -H "Authorization: Bearer ${TOKEN}"
+# expected: 405
+
+# 404 — unknown path
+curl -sS -o /dev/null -w "%{http_code}\n" "${SHIM_URL}/nope"
+# expected: 404
 ```
 
 ---

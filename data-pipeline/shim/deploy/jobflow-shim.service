@@ -6,7 +6,8 @@
 #   sudo systemctl enable --now jobflow-shim
 #
 # The service reads its config from /opt/jobflow/data-pipeline/shim/.env via
-# EnvironmentFile. Create that file from shim/.env.example before enabling.
+# EnvironmentFile. Create that file from shim/.env.example before enabling and
+# `chmod 600` it (it contains SHIM_BEARER_TOKEN).
 #
 # Assumes the repo is cloned at /opt/jobflow and Node ≥ 20.6 is installed.
 # Adjust WorkingDirectory and ExecStart paths if the repo lives elsewhere.
@@ -14,8 +15,19 @@
 [Unit]
 Description=JobFlow Cassandra write shim
 Documentation=https://github.com/tomerp20/jobflow
-After=network.target docker.service
-Wants=docker.service
+# Wait for the network to be actually online (DNS, routes ready), not just for
+# the kernel network stack to exist. `network.target` is satisfied very early
+# and is the wrong target for services that need IP reachability.
+After=network-online.target
+Wants=network-online.target
+# Cassandra runs in Docker on this box. Adding `After=docker.service` only
+# orders against the Docker daemon being up, NOT against the Cassandra
+# container being ready to accept connections. The shim handles transient
+# connect failures via the cassandra-driver's built-in reconnection policy; if
+# stricter ordering is needed, add a oneshot helper unit that waits for the
+# container's healthcheck and add `After=` it here.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -23,7 +35,7 @@ User=tomer
 Group=tomer
 WorkingDirectory=/opt/jobflow/data-pipeline/shim
 
-# Env file created from shim/.env.example — not committed.
+# Env file created from shim/.env.example — not committed. Must be chmod 600.
 EnvironmentFile=/opt/jobflow/data-pipeline/shim/.env
 
 ExecStart=/usr/bin/node shim.js
@@ -33,11 +45,41 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=jobflow-shim
 
-# Hardening: shim binds only to 127.0.0.1 and makes no outbound calls
-# beyond Cassandra on localhost; restrict network to localhost only.
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-PrivateTmp=true
+# ── Hardening ────────────────────────────────────────────────────────────────
+# The shim binds only to 127.0.0.1, makes no outbound calls beyond Cassandra
+# on localhost, never writes to the filesystem, and runs as an unprivileged
+# user. Most of the namespace/syscall restrictions below are safe wins.
+
 NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectClock=true
+ProtectProc=invisible
+LockPersonality=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+
+# AF_INET/AF_INET6 for HTTP + Cassandra; AF_UNIX for journald/syslog sockets.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @swap @reboot @debug @cpu-emulation @obsolete
+
+# Drop all capabilities — Node can bind 127.0.0.1:3100 (>1024) without any.
+CapabilityBoundingSet=
+AmbientCapabilities=
 
 [Install]
 WantedBy=multi-user.target

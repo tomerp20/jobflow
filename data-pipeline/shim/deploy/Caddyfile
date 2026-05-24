@@ -2,7 +2,9 @@
 #
 # Replace YOUR_DOMAIN with the actual public hostname (e.g. shim.example.com).
 # Caddy automatically obtains and renews a Let's Encrypt TLS certificate
-# for this domain — no certbot, no cron, no manual renewal required.
+# for this domain — no certbot, no cron, no manual renewal required. Caddy
+# also redirects HTTP→HTTPS for the same host by default; the bare HTTP
+# endpoint never serves the shim.
 #
 # Install Caddy on Ubuntu: https://caddyserver.com/docs/install#debian-ubuntu-raspbian
 #   sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
@@ -16,12 +18,51 @@
 # if SHIM_PORT is changed in shim/.env.
 
 YOUR_DOMAIN {
-    # Only the Company Scout write endpoint is exposed.
-    @companies path /companies
-    route @companies {
+    # Cap inbound bodies at the proxy layer so the shim never has to read a
+    # giant payload off the wire (shim.js also enforces a 64 KB internal cap).
+    request_body {
+        max_size 64KB
+    }
+
+    # Security headers applied to every response.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+        # Remove the default Server: Caddy banner so we don't advertise.
+        -Server
+    }
+
+    # POST /companies → shim. Only POST is forwarded; other methods get 405.
+    @register {
+        method POST
+        path /companies
+    }
+    handle @register {
         reverse_proxy 127.0.0.1:3100
     }
 
-    # Reject everything else at the proxy layer before it reaches the shim.
-    respond 404
+    # GET /health → shim. Unauthenticated liveness check used by the RUNBOOK
+    # smoke test and any future external monitor.
+    @health {
+        method GET
+        path /health
+    }
+    handle @health {
+        reverse_proxy 127.0.0.1:3100
+    }
+
+    # Path matches /companies but with the wrong method → 405 (matches HTTP
+    # semantics better than a generic 404 for the same path).
+    @companies_other_method {
+        path /companies
+    }
+    handle @companies_other_method {
+        respond 405
+    }
+
+    # Everything else gets 404 without reaching the shim.
+    handle {
+        respond 404
+    }
 }
