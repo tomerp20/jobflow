@@ -43,5 +43,9 @@ cd "${REPO_ROOT}"
 # Keep this assignment here (not hoisted) so that ordering invariant holds.
 END_DATE="${END_DATE:-$(date -u -d 'yesterday' +%Y-%m-%d)}"
 
+# Headroom for libuv threadpool (default 4). 8 workers × 1 concurrent gunzip each
+# plus spare slots for fs IO. Cheap insurance, see ADR 0008.
+export UV_THREADPOOL_SIZE="${UV_THREADPOOL_SIZE:-16}"
+
 node data-pipeline/fetcher/fetcher.js --range "${BACKFILL_START_DATE}" "${END_DATE}"
 node data-pipeline/orchestrators/backfill.js
