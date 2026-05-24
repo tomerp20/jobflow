@@ -13,6 +13,14 @@ Each entry: **what happened → what we'd change**. Skip generic platitudes.
 
 ---
 
+## 2026-05-24 (Company Scout E2E + three cross-cutting lessons)
+
+- **Render's `PUT /v1/services/{serviceId}/env-vars` is a full-replace, not an upsert.** Sent a 3-element array thinking it would merge with existing env vars; wiped 15 production env vars including `DATABASE_URL` which the Render API does not expose snapshots of. The deployed app refused to start until each value was rebuilt — some from local `.env`, some asked from the user, some regenerated (forced a JWT-secret rotation that invalidated the user's active session). → For 1–3 env-var changes, use `PUT /v1/services/{serviceId}/env-vars/{key}` per-key (creates if missing). Only use the bulk endpoint when you have the complete list of existing values to send back. Captured in `reference_render.md` for next-session recall.
+- **First-Sighting silent skip cost a confused round-trip during the E2E test.** Operator added a Salesforce card to test the pipeline; nothing appeared in the logs. Reason: Salesforce was already in `cards` from 2026-05-13, so `createCard`'s dedup correctly skipped invoking `runCompanyCheck` — but the skip path emits no log line, so "Scout did nothing" was indistinguishable from "Scout never ran." → Tracked as issue #252 (one-line `debug` log on the skip path). Gotcha also added to `knowledge/wiki/company-scout.md` Surprises section so future debuggers find it on the same page they read about how the Scout works.
+- **Stacked-PR chain (`ship-181 → ship-182 → ship-183 → ship-184`) works cleanly in one autonomous run when each agent branches off the prior WIP branch.** All four slices shipped + reviewed + fix-committed via `/ship` without human merge gates between them. The trick: `gh pr create --base main` in every agent so each PR's eventual merge target is `main` — the diff against `main` includes prior unmerged slices' changes (expected for a stacked PR), and merge order is `#244 → #247 → #248 → #249` per stack depth. Branch-rebase pain was essentially zero because each slice was small. → Refines the existing `feedback_sequential_tasks.md` memory; the chain pattern is now validated for autonomous-window multi-slice shipping, not just for "agents-with-human-in-the-loop."
+
+---
+
 - **2026-05-24 — slice 4 ship (PR #249).** Edits made in the main working dir (on the wrong slice-3 branch) were copied to the worktree via `cp` before staging — the worktree isolation pattern means all Edit/Write calls must target the worktree path directly, not the main jobflow dir. → When shipping in a worktree context, always compute the absolute worktree path and pass it to Edit/Write from the start; don't rely on the main checkout.
 
 ## 2026-05-24 (PR #248 — Company Scout slice 3)

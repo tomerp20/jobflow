@@ -11,8 +11,7 @@ sources:
 related: [[application]] [[company]] [[first-sighting]] [[org]] [[active-github-presence]] [[cassandra-analytics-pipeline]] [[backfill]] [[hourly-ingest]] [[email-agent]] [[adr-0003-backfill-hourly-relay-race]] [[adr-0009-org-scorer-weighted-scoring]] [[adr-0010-https-shim-write-path]]
 updated: 2026-05-24
 status: stable
-shipped: "#181 (slice 1), #182 (slice 2 — PR #247), #183 (slice 3 — PR #248), #184 (slice 4 — PR #249)"
-shipped: "#181 (slice 1), #182 (slice 2 — PR #247), #183 (slice 3 — PR #248), #246 (shim — PR #250)"
+shipped: "#181 (slice 1, PR #244), #182 (slice 2, PR #247), #183 (slice 3, PR #248), #184 (slice 4, PR #249), #246 (shim, PR #250) — verified end-to-end against a live Datadog card 2026-05-24"
 ---
 
 # Company Scout
@@ -57,6 +56,7 @@ The analytics pipeline can't profile a Company until its `(Company, Org)` rows e
   - Company adds a new Org months later → Scout doesn't re-evaluate; the new Org is never registered.
   - All cards for a Company are deleted then a new one is added → Scout fires again; previously-registered Orgs return `already_exists` from the shim (safe).
 - **`active` column in `companies` is effectively always `true` in v1.** Only active Orgs are written, so the column never carries a `false` value through this path. The schema retains it for future flexibility; no v1 change.
+- **First-Sighting silent skip is invisible — debuggability dark zone.** When a card is created for a Company name *already* present in `cards`, the dedup in `createCard` returns early and `runCompanyCheck` is never invoked. There is currently **no log line** emitted on this skip path, so an absence of Scout logs is ambiguous between "Scout ran but found nothing" and "Scout was never invoked at all." Cost a confused round-trip during the 2026-05-24 E2E test (operator added a Salesforce card that already existed from 2026-05-13 and saw zero Scout output). Tracked for fix as a one-line debug-level log in issue #252.
 - **OrgScorer calibration result (slice 2).** No weight tuning was needed. Under the ADR 0009 starting weights: Wix→wix (85), Tenable→tenable (120), Salesforce→salesforce (120) all pass ≥80; Riverside→Riverside-Software (40), Faye→faye (50), Rise→rise (50) all reject <80. The key mechanism: exact slug (+50) alone doesn't clear the threshold — the credibility signals (repos +10, followers +10) and display-name match together push anchors over 80, while small/unknown orgs with only an exact slug hit stay at 50.
 
 ## Open questions
