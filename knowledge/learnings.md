@@ -13,6 +13,11 @@ Each entry: **what happened → what we'd change**. Skip generic platitudes.
 
 ---
 
+## 2026-05-24 (PR #243 — Company Scout re-grill)
+
+- **The first grill produced a misaligned PRD because the wiki pre-load step was skipped.** The `grill-with-docs` skill explicitly instructs `Read knowledge/wiki/index.md` + grep for the topic *before asking the first question*. Skipping that step produced a PRD that assumed single-Org Companies, deferred the Cassandra write, and ignored the `initialized = false` invariant from ADR 0003 — all of which were resolved in the wiki and `CassandraPlan.md`. The user caught it; the entire grill had to be redone. → Treat the skill's pre-load step as load-bearing, not flavor text. If `knowledge/wiki/` exists, reading the index + topic-matched pages is the *first* tool call of the grill, not an optional warm-up.
+- **Multi-fact raw files map cleanly when the design itself was already structured.** This raw was a grill transcript with discrete decisions; each decision had an obvious target (per-Org classification → CONTEXT.md; OrgScorer rubric → ADR 0009; HTTPS shim → ADR 0010; system context → wiki/company-scout.md). The ingest was bookkeeping rather than authoring — material was written *during* the grill per the skill's "update CONTEXT.md inline" rule. → When a raw file is the transcript of a structured workflow, the workflow's own discipline does most of the ingest work; the post-hoc step is just recording outputs and appending this bullet.
+
 ## 2026-05-24 (PR #242 — fetcher p-limit bump)
 
 - **File size varies ~3× across different months of GH Archive.** Jan 2025 files averaged ~77 MB/hour vs ~25 MB for May 2026 — GitHub event volume grew significantly. When benchmarking fetcher throughput, files/sec is a misleading metric across different date ranges; MB/s is the correct comparison. The p-limit(3→6) bump yielded ~2.2× MB/s improvement (71 vs 33 MB/s) on the Xubuntu box, clearing the >1.3× approval threshold.

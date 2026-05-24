@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "files": {
+    "raw/2026-05-24-grill-company-scout.md": {
+      "sha256": "9a57e2dd31b0e58894ad1d84dd5f6dc4a2dd8ae1f73c00d7fc4bc2d4b38d797e",
+      "processed_at": "2026-05-24T00:00:00Z",
+      "outputs": {
+        "wiki": ["company-scout.md"],
+        "adr": ["docs/adr/0009-org-scorer-weighted-scoring.md", "docs/adr/0010-https-shim-write-path.md"],
+        "context_md": ["Company Scout (revised)", "Active GitHub Presence (revised per-Org)", "Relationships (Scout bullets split)"],
+        "memory": []
+      },
+      "notes": "Re-grill of PRD #180 against the wiki (the first grill skipped the wiki pre-load). All material captured inline during the grill and merged via PR #243; this manifest entry just records the bookkeeping."
+    }
+  }
+}
