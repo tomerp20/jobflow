@@ -1,5 +1,8 @@
 import logger from '../../config/logger';
 import { LoggingCompanyRegistry, type CompanyRegistry } from './companyRegistry';
+import { resolveOrgs } from './orgResolver';
+import { listOrgRepos } from './githubClient';
+import { latestActivePush } from './activePresenceClassifier';
 
 // The registry singleton is resolved once at module load time.
 // HttpShimCompanyRegistry (slice #184) will be swapped in here when
@@ -10,9 +13,14 @@ const registry: CompanyRegistry = new LoggingCompanyRegistry();
 /**
  * Runs the Company Scout for a Company on its First Sighting.
  *
- * Slice 1 skeleton: logs the First Sighting and delegates to the registry
- * with an empty activeOrgs array (placeholder — GitHub resolution lands in
- * slice #182 / #183). HttpShimCompanyRegistry is deferred to slice #184.
+ * Full end-to-end flow (slice #183):
+ *   1. Org Resolver → accepted candidate Orgs (slug probe + search + prefix sweep).
+ *   2. For each accepted Org: listOrgRepos → Active-Presence Classifier.
+ *   3. Keep only Orgs with Active GitHub Presence.
+ *   4. Build the activeOrgs payload and hand off to CompanyRegistry.register.
+ *
+ * In this slice the registry is LoggingCompanyRegistry — real `registered` /
+ * `already_exists` statuses arrive in slice #184 with the HTTPS shim client.
  *
  * ---
  * ACCEPTED EDGE CASE — gmailSync transaction-boundary race:
@@ -46,5 +54,81 @@ export async function runCompanyCheck(
     card_urls: cardUrls,
   });
 
-  await registry.register(companyName, []);
+  try {
+    // ------------------------------------------------------------------
+    // Step 1 — Resolve accepted candidate Orgs
+    // ------------------------------------------------------------------
+
+    const acceptedOrgs = await resolveOrgs(companyName, cardUrls);
+
+    if (acceptedOrgs === null) {
+      // Safety cap exceeded — resolver already logged the error; write nothing.
+      return;
+    }
+
+    if (acceptedOrgs.length === 0) {
+      logger.info('company_scout.no_orgs_found', {
+        service: 'company-scout',
+        company: companyName,
+      });
+      return;
+    }
+
+    // ------------------------------------------------------------------
+    // Step 2 — Classify each accepted Org; keep only active ones
+    // ------------------------------------------------------------------
+
+    const activeOrgs: Array<{ org_name: string; last_repo_push: string }> = [];
+
+    for (const accepted of acceptedOrgs) {
+      const repos = await listOrgRepos(accepted.login);
+
+      if (repos === null) {
+        // Rate-limit / timeout / network error — skip this Org but continue
+        // processing the rest.  Errors are already logged inside githubClient.
+        logger.warn('company_scout.repos_unavailable', {
+          service: 'company-scout',
+          company: companyName,
+          org: accepted.login,
+        });
+        continue;
+      }
+
+      const lastPush = latestActivePush(repos);
+
+      if (lastPush === null) {
+        // Org has no active public non-fork repos — classifier rejects it.
+        logger.info('company_scout.org_inactive', {
+          service: 'company-scout',
+          company: companyName,
+          org: accepted.login,
+        });
+        continue;
+      }
+
+      // Org passes the Active-Presence Classifier.
+      logger.info('company_scout.org_active', {
+        service: 'company-scout',
+        company: companyName,
+        org: accepted.login,
+        last_repo_push: lastPush,
+      });
+
+      activeOrgs.push({ org_name: accepted.login, last_repo_push: lastPush });
+    }
+
+    // ------------------------------------------------------------------
+    // Step 3 — Hand off to registry (LoggingCompanyRegistry in this slice)
+    // ------------------------------------------------------------------
+
+    await registry.register(companyName, activeOrgs);
+  } catch (err: unknown) {
+    // Errors from the GitHub API / resolver / classifier must never surface
+    // to the caller — card creation is fire-and-forget.
+    logger.error('company_scout.error', {
+      service: 'company-scout',
+      company: companyName,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
