@@ -13,6 +13,11 @@ Each entry: **what happened → what we'd change**. Skip generic platitudes.
 
 ---
 
+## 2026-05-24 (PR #248 — Company Scout slice 3)
+
+- **Anchor prefix sweep requires an explicit login-prefix filter after `searchOrgs`.** `searchOrgs("wix-")` returns any org whose name or login contains "wix-", not just those whose login literally starts with `wix-`. Always filter results with `login.toLowerCase().startsWith(anchor + "-")` before scoring — otherwise unrelated orgs that happen to contain the anchor substring get the W_ANCHOR_PREFIX_SIBLING bonus. This filter is in `orgResolver.ts:prefixResults.filter`.
+- **`latestActivePush` is a natural companion to `hasActiveGitHubPresence` for the same single-pass.** The Classifier and the payload builder both need to scan the repo list; exporting `latestActivePush` (returns `string | null`) means the main orchestrator pays for one scan, not two, and the null return doubles as the "inactive" signal. → When a pure classifier and a data-extraction step share identical filtering logic, collapse them into a single function that returns data-or-null rather than two functions (boolean + extractor).
+
 ## 2026-05-24 (PR #247 — Company Scout slice 2)
 
 - **OrgScorer calibration: exact-slug-only orgs naturally stay below threshold without threshold tuning.** Small/unknown orgs that happen to have an exact slug match (e.g. `faye`, `rise`) score only 50 (exact slug +50 but no credibility signals). Real anchor orgs score 85–120 because they have followers ≥100 (+10) and repos ≥5 (+10) plus display-name match. No weight adjustment was needed on first implementation — the ADR 0009 starting weights were correct. → Trust the rubric's credibility signals to do the disambiguation work; don't inflate the threshold to compensate for calibration failures you haven't yet measured.
