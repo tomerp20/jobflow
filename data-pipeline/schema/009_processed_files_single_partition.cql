@@ -3,14 +3,11 @@
 -- --catchup mode (one per on-disk hour). With 3,426 on-disk files, this hit the
 -- cassandra-driver default pooling.maxRequestsPerConnection = 2048 limit.
 --
--- New design: single partition (bucket='singleton'). The catchup query is a single
--- Cassandra round-trip (paged scan of the singleton partition); the chronological
--- max is computed in JS via hourIdToMs(). The clustering order is DESC for operator
--- convenience when reading via cqlsh, but the APPLICATION MUST NOT rely on the
--- on-wire order — file_name has an unpadded hour component (YYYY-MM-DD-H, 0–23),
--- so a lexicographic LIMIT 1 against the clustering order returns the wrong row
--- (e.g. '…-9' beats '…-23' as a string). The application reads all rows and picks
--- the max chronologically. The DESC ordering is a cqlsh nicety only.
+-- New design: single partition (bucket='singleton'), clustering on hour_time (timestamp).
+-- Cassandra timestamps sort chronologically, so LIMIT 1 on the DESC clustering column
+-- returns the latest processed hour in a true O(1) key lookup — no JS max scan needed.
+-- hour_time is computed from file_name on write (hourIdToMs); file_name is stored as a
+-- regular column so the application can return the original string to callers.
 --
 -- Trade-off: hot-partition anti-pattern accepted because deployment is single-node Cassandra.
 -- Future multi-node topology would require repartitioning (e.g. bucket=YYYY).
@@ -24,7 +21,8 @@ DROP TABLE IF EXISTS jobflow.processed_files;
 
 CREATE TABLE jobflow.processed_files (
     bucket       text,
+    hour_time    timestamp,
     file_name    text,
     processed_at timestamp,
-    PRIMARY KEY (bucket, file_name)
-) WITH CLUSTERING ORDER BY (file_name DESC);
+    PRIMARY KEY (bucket, hour_time)
+) WITH CLUSTERING ORDER BY (hour_time DESC);

@@ -40,7 +40,7 @@ export class CassandraWriter {
     this._limit = null;
     this._insertCql = null;
     this._processedFilesInsertCql = null;
-    this._processedFilesScanCql = null;
+    this._processedFilesMaxCql = null;
     this._backfillProgressInsertCql = null;
 
     // Partition write rate tracking
@@ -57,17 +57,13 @@ export class CassandraWriter {
       `INSERT INTO ${this._keyspace}.company_events
          (company, org_name, year_month, event_time, event_id, event_type, repo_name, actor_login, is_ai, tech_tags)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-    // Scan the singleton partition and compute the chronological max in JS.
-    // We cannot use `LIMIT 1` on the clustered DESC table because `file_name`
-    // sorts lexicographically and the canonical hour ID has an unpadded hour
-    // component (`YYYY-MM-DD-H`, 0–23), so `'…-9' > '…-10'` as strings.
-    // Scanning the whole partition once is a single round-trip; the partition
-    // stays bounded (~26k rows per 3 years of hourly ingest).
-    this._processedFilesScanCql =
-      `SELECT file_name FROM ${this._keyspace}.processed_files WHERE bucket = ?`;
+    // LIMIT 1 on the hour_time DESC clustering column is a true O(1) key lookup —
+    // timestamp sorts chronologically, so the first row is always the latest hour.
+    this._processedFilesMaxCql =
+      `SELECT file_name FROM ${this._keyspace}.processed_files WHERE bucket = ? LIMIT 1`;
     this._processedFilesInsertCql =
-      `INSERT INTO ${this._keyspace}.processed_files (bucket, file_name, processed_at)
-       VALUES (?, ?, ?)`;
+      `INSERT INTO ${this._keyspace}.processed_files (bucket, hour_time, file_name, processed_at)
+       VALUES (?, ?, ?, ?)`;
     this._backfillProgressInsertCql =
       `INSERT INTO ${this._keyspace}.backfill_progress (run_id, date, status, completed_at, events_written)
        VALUES (?, ?, ?, ?, ?)`;
@@ -95,22 +91,10 @@ export class CassandraWriter {
   }
 
   // Returns the chronologically latest processed file_name, or null if none.
-  // Single Cassandra round-trip (paged read of the singleton partition).
-  // Max is computed in JS via hourIdToMs so the ordering is chronological,
-  // not lexicographic — the hour component of file_name is unpadded.
+  // O(1): LIMIT 1 on the hour_time DESC clustering column is a direct key lookup.
   async getMaxProcessedFile() {
-    const result = await this._client.execute(this._processedFilesScanCql, ['singleton'], { prepare: true });
-    if (result.rowLength === 0) return null;
-    let maxId = null;
-    let maxMs = -Infinity;
-    for (const row of result.rows) {
-      const ms = hourIdToMs(row.file_name);
-      if (ms > maxMs) {
-        maxMs = ms;
-        maxId = row.file_name;
-      }
-    }
-    return maxId;
+    const result = await this._client.execute(this._processedFilesMaxCql, ['singleton'], { prepare: true });
+    return result.rowLength > 0 ? result.rows[0].file_name : null;
   }
 
   async writeEvent(event) {
@@ -232,7 +216,7 @@ export class CassandraWriter {
   async markFileProcessed(fileName) {
     await this._client.execute(
       this._processedFilesInsertCql,
-      ['singleton', fileName, new Date()],
+      ['singleton', new Date(hourIdToMs(fileName)), fileName, new Date()],
       { prepare: true }
     );
   }
