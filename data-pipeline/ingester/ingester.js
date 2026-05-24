@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pino from 'pino';
-import { hourIdToPath, enumerateRange, enumerateAllOnDisk } from 'disk-layout';
+import { hourIdToPath, enumerateRange, enumerateAllOnDisk, hourIdToMs } from 'disk-layout';
 import { parseCLI } from './lib/cli.js';
 import { CassandraWriter } from './lib/cassandra-writer.js';
 
@@ -80,15 +80,19 @@ if (cmd.verb === 'hour') {
 } else if (cmd.verb === 'range') {
   hourIds = enumerateRange(cmd.start, cmd.end);
 } else if (cmd.verb === 'catchup') {
-  // catchup: walk disk, skip files already recorded in processed_files
+  // catchup: walk disk, find all hours after the highest already-processed hour
   const allOnDisk = enumerateAllOnDisk(GHARCHIVE_DIR);
   if (allOnDisk.length === 0) {
     logger.warn('no files in GHARCHIVE_DIR');
     await writer.shutdown();
     process.exit(0);
   }
-  const processedFlags = await Promise.all(allOnDisk.map(id => writer.isFileProcessed(id)));
-  const pending = allOnDisk.filter((_, i) => !processedFlags[i]);
+  const maxProcessed = await writer.getMaxProcessedFile();
+  // Compare chronologically (hourIdToMs), not lexicographically — the hour
+  // component of the canonical hourId is unpadded (`YYYY-MM-DD-H`, 0–23), so
+  // string compare yields '…-9' > '…-10'. Using ms timestamps avoids the bug.
+  const maxMs = maxProcessed !== null ? hourIdToMs(maxProcessed) : null;
+  const pending = maxMs !== null ? allOnDisk.filter(id => hourIdToMs(id) > maxMs) : allOnDisk;
   const alreadyProcessed = allOnDisk.length - pending.length;
   logger.info(
     { total: allOnDisk.length, alreadyProcessed, toProcess: pending.length },
@@ -156,10 +160,13 @@ process.exit(exitCode);
 async function processHour(hourId) {
   const filePath = hourIdToPath(GHARCHIVE_DIR, hourId);
 
-  // In --mode hourly: check processed_files for idempotency
-  if (cmd.mode === 'hourly') {
-    const alreadyDone = await writer.isFileProcessed(hourId);
-    if (alreadyDone) {
+  // In --mode hourly: check processed_files for idempotency.
+  // Catchup pre-filters to only unprocessed hours, so skip the query there.
+  // Compare chronologically (hourIdToMs), not lexicographically — see catchup
+  // block above for the unpadded-hour rationale.
+  if (cmd.mode === 'hourly' && cmd.verb !== 'catchup') {
+    const maxProcessed = await writer.getMaxProcessedFile();
+    if (maxProcessed !== null && hourIdToMs(hourId) <= hourIdToMs(maxProcessed)) {
       logger.info({ hourId }, 'already processed, skipping');
       return 0;
     }
@@ -294,8 +301,8 @@ async function processHour(hourId) {
 
   // In --mode hourly: mark file processed
   if (cmd.mode === 'hourly') {
-    await writer.markFileProcessed(hourId, totalParsed, totalFiltered);
-    logger.info({ hourId }, 'processed_files row written');
+    await writer.markFileProcessed(hourId);
+    logger.info({ hourId, totalParsed, totalFiltered }, 'processed_files row written');
   }
 
   return totalFiltered;

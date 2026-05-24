@@ -1,5 +1,6 @@
 import cassandra from 'cassandra-driver';
 import pLimit from 'p-limit';
+import { hourIdToMs } from 'disk-layout';
 
 const { Client, types, errors } = cassandra;
 
@@ -39,7 +40,7 @@ export class CassandraWriter {
     this._limit = null;
     this._insertCql = null;
     this._processedFilesInsertCql = null;
-    this._processedFilesSelectCql = null;
+    this._processedFilesMaxCql = null;
     this._backfillProgressInsertCql = null;
 
     // Partition write rate tracking
@@ -56,10 +57,12 @@ export class CassandraWriter {
       `INSERT INTO ${this._keyspace}.company_events
          (company, org_name, year_month, event_time, event_id, event_type, repo_name, actor_login, is_ai, tech_tags)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-    this._processedFilesSelectCql =
-      `SELECT file_name FROM ${this._keyspace}.processed_files WHERE file_name = ?`;
+    // LIMIT 1 on the hour_time DESC clustering column is a true O(1) key lookup —
+    // timestamp sorts chronologically, so the first row is always the latest hour.
+    this._processedFilesMaxCql =
+      `SELECT file_name FROM ${this._keyspace}.processed_files WHERE bucket = ? LIMIT 1`;
     this._processedFilesInsertCql =
-      `INSERT INTO ${this._keyspace}.processed_files (file_name, processed_at, event_count, filtered_count)
+      `INSERT INTO ${this._keyspace}.processed_files (bucket, hour_time, file_name, processed_at)
        VALUES (?, ?, ?, ?)`;
     this._backfillProgressInsertCql =
       `INSERT INTO ${this._keyspace}.backfill_progress (run_id, date, status, completed_at, events_written)
@@ -87,9 +90,11 @@ export class CassandraWriter {
     if (this._rateTimer) clearInterval(this._rateTimer);
   }
 
-  async isFileProcessed(fileName) {
-    const result = await this._client.execute(this._processedFilesSelectCql, [fileName], { prepare: true });
-    return result.rowLength > 0;
+  // Returns the chronologically latest processed file_name, or null if none.
+  // O(1): LIMIT 1 on the hour_time DESC clustering column is a direct key lookup.
+  async getMaxProcessedFile() {
+    const result = await this._client.execute(this._processedFilesMaxCql, ['singleton'], { prepare: true });
+    return result.rowLength > 0 ? result.rows[0].file_name : null;
   }
 
   async writeEvent(event) {
@@ -208,10 +213,10 @@ export class CassandraWriter {
     }
   }
 
-  async markFileProcessed(fileName, eventCount, filteredCount) {
+  async markFileProcessed(fileName) {
     await this._client.execute(
       this._processedFilesInsertCql,
-      [fileName, new Date(), eventCount, filteredCount],
+      ['singleton', new Date(hourIdToMs(fileName)), fileName, new Date()],
       { prepare: true }
     );
   }
