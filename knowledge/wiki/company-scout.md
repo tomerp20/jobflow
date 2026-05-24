@@ -12,7 +12,7 @@ related: [[application]] [[company]] [[first-sighting]] [[org]] [[active-github-
 updated: 2026-05-24
 status: stable
 shipped: "#181 (slice 1), #182 (slice 2 — PR #247), #183 (slice 3 — PR #248), #184 (slice 4 — PR #249)"
-shipped: "#181 (slice 1), #182 (slice 2 — PR #247), #183 (slice 3 — PR #248), #246 (shim — PR #250)"
+shipped: "#181 (slice 1), #182 (slice 2 — PR #247), #183 (slice 3 — PR #248), #246 (shim — PR #250), #252 (debug log — PR #254)"
 ---
 
 # Company Scout
@@ -48,6 +48,7 @@ The analytics pipeline can't profile a Company until its `(Company, Org)` rows e
 - The shim is the sole writer of `initialized = false` — that invariant lives in one place (see [[adr-0010-https-shim-write-path]] and [[adr-0003-backfill-hourly-relay-race]]).
 - Card creation latency is unaffected — `runCompanyCheck` is fired detached and never awaited.
 - No retry; no scheduled re-evaluation; the Scout never runs twice for the same Company while a card with that name exists.
+- **Skip path is now observable (PR #254).** When `!isFirstSighting`, `cardService.createCard` emits `company_scout.skipped_not_first_sighting` at `debug` level with `service: "company-scout"` and `company: <normalized name>`. Silent at default `LOG_LEVEL=info`; raise to `debug` to distinguish "Scout skipped" from "Scout ran and found nothing".
 
 ## Surprises / gotchas
 

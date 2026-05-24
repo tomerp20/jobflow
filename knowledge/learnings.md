@@ -13,6 +13,8 @@ Each entry: **what happened → what we'd change**. Skip generic platitudes.
 
 ---
 
+- **2026-05-24 — PR #254 (issue #252 — Scout skip debug log).** The absence of any Scout log on the `!isFirstSighting` path was ambiguous — during the 2026-05-24 E2E test, Salesforce produced no Scout logs because it was already known; the operator had to query `cards` directly to confirm. Adding a `debug`-level log at the branch resolves the ambiguity without production noise. → When a code path that silently returns/skips is also a "system is healthy" path, add a `debug` log at the branch point so operators can tell "skipped intentionally" from "never reached".
+
 - **2026-05-24 — slice 4 ship (PR #249).** Edits made in the main working dir (on the wrong slice-3 branch) were copied to the worktree via `cp` before staging — the worktree isolation pattern means all Edit/Write calls must target the worktree path directly, not the main jobflow dir. → When shipping in a worktree context, always compute the absolute worktree path and pass it to Edit/Write from the start; don't rely on the main checkout.
 
 ## 2026-05-24 (PR #248 — Company Scout slice 3)
