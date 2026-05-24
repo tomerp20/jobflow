@@ -62,11 +62,11 @@ async function logActivity(
   });
 }
 
-type ATSEntry =
+export type ATSEntry =
   | { pattern: RegExp; slugFrom: 'path' | 'subdomain'; stripPrefix?: string; noSlug?: false }
   | { pattern: RegExp; noSlug: true };
 
-const ATS_PLATFORMS: ATSEntry[] = [
+export const ATS_PLATFORMS: ATSEntry[] = [
   { pattern: /^(boards|job-boards|job-boards\.eu)\.greenhouse\.io$/, slugFrom: 'path' },
   { pattern: /^jobs\.lever\.co$/, slugFrom: 'path' },
   { pattern: /^[\w-]+\.wd\d+\.myworkdayjobs\.com$/, slugFrom: 'subdomain' },
@@ -87,7 +87,7 @@ function getATSEntry(hostname: string) {
   return ATS_PLATFORMS.find((p) => p.pattern.test(hostname)) ?? null;
 }
 
-function extractATSSlug(url: string): string | null {
+export function extractATSSlug(url: string): string | null {
   try {
     const parsed = new URL(url);
     const hostname = parsed.hostname;
