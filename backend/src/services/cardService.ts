@@ -3,6 +3,7 @@ import db from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { shiftUp, shiftDown, withTransaction } from '../util/positions';
 import { runCompanyCheck } from './companyScout/companyScout';
+import logger from '../config/logger';
 
 export interface CardFilters {
   stage?: string;
@@ -327,6 +328,11 @@ export const cardService = {
         applicationUrl: data.application_url,
         careersUrl: data.careers_url,
       }).catch(() => { /* intentionally suppressed — Scout errors must not fail card creation */ });
+    } else {
+      logger.debug('company_scout.skipped_not_first_sighting', {
+        service: 'company-scout',
+        company: normalizedCompany,
+      });
     }
 
     // Return card with stage name
