@@ -11,6 +11,7 @@ sources:
 related: [[application]] [[company]] [[first-sighting]] [[org]] [[active-github-presence]] [[cassandra-analytics-pipeline]] [[backfill]] [[hourly-ingest]] [[email-agent]] [[adr-0003-backfill-hourly-relay-race]] [[adr-0009-org-scorer-weighted-scoring]] [[adr-0010-https-shim-write-path]]
 updated: 2026-05-24
 status: stable
+shipped: "#181 (slice 1)"
 ---
 
 # Company Scout
@@ -65,8 +66,8 @@ The analytics pipeline can't profile a Company until its `(Company, Org)` rows e
 ## Source pointers
 
 - Trigger site: `backend/src/services/cardService.ts` (in `createCard`)
-- Scout orchestrator: `backend/src/services/companyScout/` (planned)
-- OrgScorer module: `backend/src/services/companyScout/orgScorer.ts` (planned)
+- Scout orchestrator: `backend/src/services/companyScout/companyScout.ts` (skeleton — slice 1); `companyRegistry.ts` (LoggingCompanyRegistry — slice 1)
+- OrgScorer module: `backend/src/services/companyScout/orgScorer.ts` (planned — slice 2/3)
 - HTTPS shim: separate deliverable in `data-pipeline/` repo (not in JobFlow)
 - Cassandra schema: `data-pipeline/schema/004_companies.cql` + `005_alter_companies_initialized.cql`
 - Canonical pipeline design: `docs/CassandraPlan.md` §4.4 (`companies` table)
