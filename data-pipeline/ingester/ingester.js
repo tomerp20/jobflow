@@ -1,6 +1,3 @@
-import { createReadStream } from 'fs';
-import { createGunzip } from 'zlib';
-import { createInterface } from 'readline';
 import { Worker } from 'worker_threads';
 import os from 'os';
 import path from 'path';
@@ -19,12 +16,18 @@ const CASSANDRA_KEYSPACE = process.env.CASSANDRA_KEYSPACE ?? 'jobflow';
 const GHARCHIVE_DIR = process.env.GHARCHIVE_DIR ?? './data/gharchive';
 const LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
 const IS_PROD = process.env.NODE_ENV === 'production';
+// Default ceiling raised to Math.min(8, cores-2) to exploit worker-side decompression
+// (see docs/adr/0008-ingester-worker-side-decompression.md). Env override still respected.
 const INGEST_WORKERS = process.env.INGEST_WORKERS
   ? parseInt(process.env.INGEST_WORKERS, 10)
-  : Math.max(1, Math.min(4, Math.floor(os.cpus().length / 2)));
+  : Math.max(1, Math.min(8, os.cpus().length - 2));
 const HOURLY_WRITE_CONCURRENCY = process.env.HOURLY_WRITE_CONCURRENCY
   ? parseInt(process.env.HOURLY_WRITE_CONCURRENCY, 10)
   : 50;
+
+// Backpressure watermark: pause file dispatch when more than this many events
+// are in flight to Cassandra. Matches the previous in-line watermark.
+const INFLIGHT_HIGH_WATERMARK = 10000;
 
 // ── Logger ───────────────────────────────────────────────────────────────────
 const loggerOpts = { level: LOG_LEVEL };
@@ -108,204 +111,271 @@ if (cmd.verb === 'hour') {
   throw new Error(`unknown verb: ${cmd.verb}`);
 }
 
-// ── Process each hour file ────────────────────────────────────────────────────
+// ── Spawn persistent worker pool ──────────────────────────────────────────────
+const workerPool = spawnWorkers(INGEST_WORKERS);
+
 let exitCode = 0;
 
-if (cmd.mode === 'backfill' && cmd.verb === 'range') {
-  // Group hourIds by date for per-date backfill_progress tracking
-  const dateHoursMap = new Map();
-  for (const hourId of hourIds) {
-    const date = hourId.slice(0, 10); // YYYY-MM-DD
-    if (!dateHoursMap.has(date)) dateHoursMap.set(date, []);
-    dateHoursMap.get(date).push(hourId);
-  }
+try {
+  if (cmd.mode === 'backfill' && cmd.verb === 'range') {
+    // Group hourIds by date for per-date backfill_progress tracking.
+    // Process one date at a time so a failure surfaces before later dates contaminate state;
+    // within a date, dispatch hours concurrently across the worker pool.
+    const dateHoursMap = new Map();
+    for (const hourId of hourIds) {
+      const date = hourId.slice(0, 10); // YYYY-MM-DD
+      if (!dateHoursMap.has(date)) dateHoursMap.set(date, []);
+      dateHoursMap.get(date).push(hourId);
+    }
 
-  for (const [date, dateHours] of dateHoursMap) {
-    let eventsWrittenForDate = 0;
-    try {
-      for (const hourId of dateHours) {
-        eventsWrittenForDate += await processHour(hourId);
+    for (const [date, dateHours] of dateHoursMap) {
+      try {
+        const eventsWrittenForDate = await processHourBatch(dateHours);
+        // Flush remaining per-partition buffers accumulated across this date's files,
+        // then record date-level progress only after the flush lands in Cassandra.
+        await writer.flushAllPartitionBuffers();
+        await writer.writeBackfillProgress(cmd.runId, date, eventsWrittenForDate);
+        logger.info({ date, eventsWritten: eventsWrittenForDate }, 'date complete — backfill_progress written');
+      } catch (err) {
+        logger.error(
+          { date, partition: err.partitionKey ?? null, sampleEventId: err.sampleEventId ?? null, err: err.message },
+          'failed to process date — no backfill_progress row written'
+        );
+        exitCode = 1;
+        break;
       }
-      // No date-level flush needed: processHour flushes all partition buffers
-      // at end-of-file in backfill mode, so they're already empty here.
-      await writer.writeBackfillProgress(cmd.runId, date, eventsWrittenForDate);
-      logger.info({ date, eventsWritten: eventsWrittenForDate }, 'date complete — backfill_progress written');
-    } catch (err) {
-      logger.error(
-        { date, partition: err.partitionKey ?? null, sampleEventId: err.sampleEventId ?? null, err: err.message },
-        'failed to process date — no backfill_progress row written'
-      );
-      exitCode = 1;
-      break;
     }
-  }
-} else {
-  for (const hourId of hourIds) {
+  } else {
     try {
-      await processHour(hourId);
+      await processHourBatch(hourIds);
     } catch (err) {
-      logger.error({ hourId, err: err.message }, 'failed to process hour — stopping');
+      logger.error({ err: err.message }, 'failed to process hours — stopping');
       exitCode = 1;
-      break;
     }
   }
+} finally {
+  // Terminate persistent worker pool, then shutdown Cassandra client.
+  await Promise.all(workerPool.map(w => w.terminate().catch(() => undefined)));
+  await writer.shutdown();
 }
 
-await writer.shutdown();
 process.exit(exitCode);
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Returns the number of filtered events written (used by backfill date accumulator).
-async function processHour(hourId) {
-  const filePath = hourIdToPath(GHARCHIVE_DIR, hourId);
+// Dispatches the given hourIds concurrently across the worker pool.
+// - Chronological-order invariants:
+//     * dispatch happens in input order
+//     * processed_files writes (hourly mode) happen in input order
+// - Backpressure: dispatch pauses while events-in-flight to Cassandra exceeds the watermark.
+// - Failure: first write or worker error aborts; remaining in-flight writes are awaited so
+//   the worker pool can be cleanly terminated afterwards.
+// Returns the total filtered (= emitted-by-worker) event count across all hours.
+async function processHourBatch(orderedHourIds) {
+  if (orderedHourIds.length === 0) return 0;
 
-  // In --mode hourly: check processed_files for idempotency.
-  // Catchup pre-filters to only unprocessed hours, so skip the query there.
-  // Compare chronologically (hourIdToMs), not lexicographically — see catchup
-  // block above for the unpadded-hour rationale.
-  if (cmd.mode === 'hourly' && cmd.verb !== 'catchup') {
-    const maxProcessed = await writer.getMaxProcessedFile();
-    if (maxProcessed !== null && hourIdToMs(hourId) <= hourIdToMs(maxProcessed)) {
-      logger.info({ hourId }, 'already processed, skipping');
-      return 0;
-    }
-  }
+  // Hours waiting to be dispatched — chronological FIFO.
+  const pendingHours = [...orderedHourIds];
+  // Workers currently idle and waiting for a file. Initially every worker is idle.
+  const readyWorkers = [...workerPool];
 
-  logger.info({ hourId, filePath }, 'processing file');
+  // Per-hour state.
+  // inFlightByHour: count of events for this hour that have been handed to the writer
+  //                 but whose write promise hasn't settled yet.
+  //
+  // NOTE on durability semantics — DO NOT remove without revisiting tryFinalize below:
+  //   - hourly mode: `writer.writeEvent`'s promise resolves only on actual Cassandra write
+  //     success, so inFlightByHour accurately gates `markFileProcessed`.
+  //   - backfill mode: `writer.addBackfillEvent` returns Promise.resolve() once the event
+  //     is buffered in cassandra-writer's per-partition batch, NOT once it lands in
+  //     Cassandra. The per-hour finalize log here is therefore "events accounted for",
+  //     not "events durable". Durability is enforced at the date boundary via
+  //     `flushAllPartitionBuffers` + `writeBackfillProgress` in the outer loop.
+  //     If a future change adds `markFileProcessed` (or any per-hour durability marker)
+  //     to the backfill branch below, it MUST first await a flush — otherwise resume
+  //     semantics will silently corrupt on a mid-date crash.
+  const inFlightByHour = new Map();
+  const dispatchedAll = new Set();              // worker has emitted fileDone for this hour
+  const statsByHour = new Map();                // {totalEmitted, droppedNoTimestamp, droppedNoId}
+  let nextFinalizeIdx = 0;                      // index into orderedHourIds of next hour to finalize
+  let totalEventsEmittedAcrossHours = 0;        // accumulator for return value
 
-  const workers = spawnWorkers(INGEST_WORKERS);
-  let workerIdx = 0;
-
-  let totalParsed = 0;
-  let totalFiltered = 0;
-  let totalDroppedNoTimestamp = 0;
-  let totalDroppedNoId = 0;
-  let inFlight = 0;
+  let totalInFlight = 0;
+  let busyWorkers = 0;   // dispatched but not yet returned (fileDone, workerError, or hard crash)
   let writeError = null;
-  let paused = false;
 
-  function onWorkerResult({ results, droppedNoTimestamp, droppedNoId }) {
-    if (writeError) return; // stop buffering once a fatal write error has been observed
-    totalDroppedNoTimestamp += droppedNoTimestamp;
-    totalDroppedNoId += droppedNoId;
-    for (const event of results) {
-      totalParsed++;
-      inFlight++;
-      if (cmd.mode === 'backfill') {
-        writer.addBackfillEvent(event).then(() => {
-          totalFiltered++;
-          inFlight--;
-        }).catch(err => {
-          inFlight--;
-          if (!writeError) {
-            writeError = err;
-            logger.error(
-              { event_id: err.sampleEventId ?? event.event_id, partition: err.partitionKey ?? `${event.company}/${event.year_month}`, err: err.message },
-              'batch flush failed after retries'
-            );
+  let resolveDone, rejectDone;
+  const done = new Promise((res, rej) => { resolveDone = res; rejectDone = rej; });
+
+  function tryDispatch() {
+    while (
+      !writeError &&
+      readyWorkers.length > 0 &&
+      pendingHours.length > 0 &&
+      totalInFlight < INFLIGHT_HIGH_WATERMARK
+    ) {
+      const worker = readyWorkers.shift();
+      const hourId = pendingHours.shift();
+      const filePath = hourIdToPath(GHARCHIVE_DIR, hourId);
+      inFlightByHour.set(hourId, 0);
+      busyWorkers++;
+      logger.info({ hourId, filePath, worker: worker.threadId }, 'dispatching file to worker');
+      worker.postMessage({ type: 'processFile', hourId, filePath });
+    }
+    checkTerminalCondition();
+  }
+
+  function checkTerminalCondition() {
+    if (writeError) {
+      // Wait until all in-flight writes settle AND every dispatched worker has
+      // returned (via fileDone, workerError, or hard crash). Using busyWorkers
+      // rather than readyWorkers.length so a hard-crashed worker (which is not
+      // returned to the pool) still counts toward the quorum.
+      if (totalInFlight === 0 && busyWorkers === 0) {
+        rejectDone(writeError);
+      }
+      return;
+    }
+    // Success: every input hour finalized.
+    if (nextFinalizeIdx === orderedHourIds.length) {
+      resolveDone(totalEventsEmittedAcrossHours);
+    }
+  }
+
+  // Finalize hours in chronological input order. Awaits the underlying
+  // markFileProcessed write so it cannot interleave with itself.
+  let finalizing = false;
+  let finalizePending = false;
+  async function tryFinalize() {
+    if (finalizing) { finalizePending = true; return; }
+    finalizing = true;
+    try {
+      do {
+        finalizePending = false;
+        while (nextFinalizeIdx < orderedHourIds.length) {
+          const h = orderedHourIds[nextFinalizeIdx];
+          if (!dispatchedAll.has(h)) break;
+          if ((inFlightByHour.get(h) ?? 0) > 0) break;
+          if (writeError) break;
+
+          const stats = statsByHour.get(h) ?? { totalEmitted: 0, droppedNoTimestamp: 0, droppedNoId: 0 };
+          totalEventsEmittedAcrossHours += stats.totalEmitted;
+          // In hourly mode this log line precedes a durable `markFileProcessed` write below.
+          // In backfill mode the events may still be sitting in cassandra-writer per-partition
+          // buffers — durability is deferred to the date-level `flushAllPartitionBuffers`.
+          logger.info(
+            { hourId: h, totalEmitted: stats.totalEmitted, droppedNoTimestamp: stats.droppedNoTimestamp, droppedNoId: stats.droppedNoId },
+            cmd.mode === 'hourly' ? 'hour complete' : 'hour buffered — durability deferred to date flush'
+          );
+          if (cmd.mode === 'hourly') {
+            try {
+              await writer.markFileProcessed(h);
+              logger.info({ hourId: h }, 'processed_files row written');
+            } catch (err) {
+              if (!writeError) {
+                writeError = err;
+                logger.error({ hourId: h, err: err.message }, 'markFileProcessed failed');
+              }
+              break;
+            }
           }
+          nextFinalizeIdx++;
+        }
+      } while (finalizePending && !writeError);
+    } finally {
+      finalizing = false;
+    }
+    checkTerminalCondition();
+  }
+
+  function recordWriteError(err) {
+    if (writeError) return;
+    writeError = err;
+  }
+
+  function attachWorker(worker) {
+    worker.on('message', (msg) => {
+      if (!msg || !msg.type) return;
+
+      if (msg.type === 'events') {
+        if (writeError) return; // drop further events once we've started failing
+        const { hourId, results } = msg;
+        for (const event of results) {
+          inFlightByHour.set(hourId, (inFlightByHour.get(hourId) ?? 0) + 1);
+          totalInFlight++;
+          const p = cmd.mode === 'backfill'
+            ? writer.addBackfillEvent(event)
+            : writer.writeEvent(event);
+          // The matching `inFlightByHour.set(hourId, current + 1)` above guarantees
+          // the key exists by the time these callbacks fire; no `??` fallback needed.
+          p.then(() => {
+            inFlightByHour.set(hourId, inFlightByHour.get(hourId) - 1);
+            totalInFlight--;
+            if (totalInFlight < INFLIGHT_HIGH_WATERMARK) tryDispatch();
+            tryFinalize();
+          }).catch((err) => {
+            inFlightByHour.set(hourId, inFlightByHour.get(hourId) - 1);
+            totalInFlight--;
+            if (!writeError) {
+              const partitionKey = err.partitionKey ?? `${event.company}/${event.year_month}`;
+              const sampleEventId = err.sampleEventId ?? event.event_id;
+              logger.error(
+                { hourId, partition: partitionKey, event_id: sampleEventId, err: err.message },
+                cmd.mode === 'backfill' ? 'batch flush failed after retries' : 'write failed after retries'
+              );
+              recordWriteError(err);
+            }
+            checkTerminalCondition();
+          });
+        }
+      } else if (msg.type === 'fileDone') {
+        statsByHour.set(msg.hourId, {
+          totalEmitted: msg.totalEmitted,
+          droppedNoTimestamp: msg.droppedNoTimestamp,
+          droppedNoId: msg.droppedNoId,
         });
-      } else {
-        writer.writeEvent(event).then(() => {
-          totalFiltered++;
-          inFlight--;
-        }).catch(err => {
-          inFlight--;
-          writeError = err;
-          logger.error({ event_id: event.event_id, partition: `${event.company}/${event.year_month}`, err: err.message }, 'write failed after retries');
-        });
+        dispatchedAll.add(msg.hourId);
+        busyWorkers--;
+        readyWorkers.push(worker);
+        tryDispatch();
+        tryFinalize();
+      } else if (msg.type === 'workerError') {
+        logger.error({ hourId: msg.hourId, err: msg.message }, 'worker failed on file');
+        const err = new Error(`worker error on ${msg.hourId}: ${msg.message}`);
+        recordWriteError(err);
+        busyWorkers--;
+        readyWorkers.push(worker);
+        checkTerminalCondition();
       }
+    });
+
+    worker.on('error', (err) => {
+      logger.error({ err: err.message }, 'worker thread errored');
+      recordWriteError(err);
+      busyWorkers--;
+      // The worker is gone; do not return it to readyWorkers.
+      checkTerminalCondition();
+    });
+  }
+
+  // Strip any listeners installed by a previous processHourBatch invocation
+  // (backfill-mode date loop calls us once per date with the same worker pool).
+  for (const w of workerPool) {
+    w.removeAllListeners('message');
+    w.removeAllListeners('error');
+    attachWorker(w);
+  }
+
+  tryDispatch();
+
+  try {
+    return await done;
+  } finally {
+    for (const w of workerPool) {
+      w.removeAllListeners('message');
+      w.removeAllListeners('error');
     }
   }
-
-  let rl = null;
-
-  for (const w of workers) {
-    w.on('message', (events) => {
-      onWorkerResult(events);
-      // Resume reading if we drained below the low-water mark
-      if (paused && inFlight <= 5000) {
-        paused = false;
-        rl?.resume();
-      }
-    });
-  }
-
-  // Stream the file through readline, distribute batches to workers
-  await new Promise((resolve, reject) => {
-    const fileStream = createReadStream(filePath);
-    const gunzip = createGunzip();
-    rl = createInterface({ input: fileStream.pipe(gunzip), crlfDelay: Infinity });
-
-    let batch = [];
-
-    function dispatchBatch(lines) {
-      const worker = workers[workerIdx % workers.length];
-      workerIdx++;
-      worker.postMessage(lines);
-
-      // Apply backpressure: pause reading until in-flight Cassandra writes drain
-      if (inFlight > 10000 && !paused) {
-        paused = true;
-        rl.pause();
-      }
-    }
-
-    rl.on('line', (line) => {
-      if (writeError) {
-        rl.close();
-        fileStream.destroy();
-        return;
-      }
-      batch.push(line);
-      if (batch.length >= 1000) {
-        const toSend = batch;
-        batch = [];
-        dispatchBatch(toSend);
-      }
-    });
-
-    rl.on('close', () => {
-      if (batch.length > 0) {
-        dispatchBatch(batch);
-        batch = [];
-      }
-      resolve();
-    });
-
-    fileStream.on('error', reject);
-    gunzip.on('error', reject);
-    rl.on('error', reject);
-  });
-
-  // Drain remaining in-flight writes
-  while (inFlight > 0) {
-    await sleep(50);
-  }
-
-  // Terminate workers (parallel)
-  await Promise.all(workers.map(w => w.terminate()));
-
-  if (writeError) {
-    logger.error({ hourId }, 'hour failed');
-    throw writeError;
-  }
-
-  // In backfill mode: flush buffered events accumulated during this file
-  if (cmd.mode === 'backfill') {
-    await writer.flushAllPartitionBuffers();
-  }
-
-  logger.info({ hourId, totalParsed, totalFiltered, totalDroppedNoTimestamp, totalDroppedNoId }, 'hour complete');
-
-  // In --mode hourly: mark file processed
-  if (cmd.mode === 'hourly') {
-    await writer.markFileProcessed(hourId);
-    logger.info({ hourId, totalParsed, totalFiltered }, 'processed_files row written');
-  }
-
-  return totalFiltered;
 }
 
 function spawnWorkers(count) {
@@ -315,10 +385,6 @@ function spawnWorkers(count) {
   );
 }
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -326,7 +392,11 @@ function escapeRegex(s) {
 // Graceful shutdown on SIGINT/SIGTERM so pino flushes and Cassandra connection closes cleanly.
 async function gracefulShutdown(signal) {
   logger.info({ signal }, 'shutting down');
-  await writer.shutdown();
+  try {
+    await Promise.all(workerPool.map(w => w.terminate().catch(() => undefined)));
+  } finally {
+    await writer.shutdown();
+  }
   process.exit(0);
 }
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));

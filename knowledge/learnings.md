@@ -13,6 +13,10 @@ Each entry: **what happened → what we'd change**. Skip generic platitudes.
 
 ---
 
+## 2026-05-24 (PR #241 — ingester worker-side decompression)
+
+- **Main-thread readline is the silent bottleneck in Node.js streaming pipelines.** When the hot loop is `readline.on('line')` dispatching to workers via `postMessage`, the workers starve because the main thread can't feed them fast enough — even if libuv (gunzip) and the workers themselves are under capacity. The fix is to move the entire `createReadStream → createGunzip → createInterface` pipeline into each worker so each worker pulls directly from disk. → Before profiling worker starvation, check main-thread CPU utilization — if the main thread is hot while workers idle, the bottleneck is the dispatch loop, not the workers.
+
 ## 2026-05-24
 
 - **`processed_files` schema change reveals that "No schema change" claims in ADRs age poorly.** ADR 0005 explicitly said "No schema change" and that claim became incorrect when issue #238 restructured the table. Future ADRs that make "no X" claims should include a "what would invalidate this" section so stale markers are easier to find. → Added superseded warning inline in [[adr-0005-processed-files-hourly-only]] rather than deleting it; linking pattern between ADRs is more durable than rewriting history.

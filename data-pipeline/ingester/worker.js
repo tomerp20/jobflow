@@ -1,4 +1,7 @@
 import { workerData, parentPort } from 'worker_threads';
+import { createReadStream } from 'fs';
+import { createGunzip } from 'zlib';
+import { createInterface } from 'readline';
 import { extractTags } from './lib/tag-extractor.js';
 import { detectAI } from './lib/ai-detector.js';
 
@@ -10,53 +13,97 @@ const orgRegex = new RegExp(orgRegexSource);
 
 const ALLOWED_TYPES = new Set(['PushEvent', 'PullRequestEvent', 'IssuesEvent', 'ReleaseEvent']);
 
-parentPort.on('message', (lines) => {
-  const results = [];
+// Batch extracted events back to main in chunks. 500 keeps postMessage overhead low
+// without ballooning main-thread Cassandra dispatch latency.
+const EVENT_BATCH_SIZE = 500;
+
+// The only message the worker accepts is `processFile`. Shutdown is driven by
+// the main thread calling `worker.terminate()` directly (see ingester.js), so
+// there is no graceful-shutdown channel here.
+parentPort.on('message', async (msg) => {
+  if (msg?.type === 'processFile') {
+    await processFile(msg.hourId, msg.filePath);
+  }
+});
+
+async function processFile(hourId, filePath) {
+  let totalEmitted = 0;
   let droppedNoTimestamp = 0;
   let droppedNoId = 0;
+  let batch = [];
 
-  for (const line of lines) {
-    // Fast filter: substring regex on raw line before any JSON.parse
-    if (!orgRegex.test(line)) continue;
-
-    let event;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
-    }
-
-    // 4-type filter
-    if (!ALLOWED_TYPES.has(event.type)) continue;
-
-    // Company filter via orgToCompany map
-    const repoName = event.repo?.name ?? '';
-    const org = repoName.split('/')[0];
-    const company = orgToCompany[org];
-    if (!company) continue;
-
-    const createdAt = event.created_at;
-    if (!createdAt) { droppedNoTimestamp++; continue; }
-
-    if (!event.id) { droppedNoId++; continue; }
-
-    const yearMonth = new Date(createdAt).toISOString().slice(0, 7);
-    const techTags = [...extractTags(event)];
-    const isAI = detectAI(event);
-
-    results.push({
-      company,
-      org_name: org,
-      year_month: yearMonth,
-      event_time: createdAt,
-      event_id: String(event.id),
-      event_type: event.type,
-      repo_name: repoName,
-      actor_login: event.actor?.login ?? '',
-      is_ai: isAI,
-      tech_tags: techTags,
-    });
+  function flushBatch() {
+    if (batch.length === 0) return;
+    parentPort.postMessage({ type: 'events', hourId, results: batch });
+    batch = [];
   }
 
-  parentPort.postMessage({ results, droppedNoTimestamp, droppedNoId });
-});
+  let fileStream;
+  let gunzip;
+  let rl;
+  try {
+    fileStream = createReadStream(filePath);
+    gunzip = createGunzip();
+    rl = createInterface({ input: fileStream.pipe(gunzip), crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      // Fast filter: substring regex on raw line before any JSON.parse
+      if (!orgRegex.test(line)) continue;
+
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      if (!ALLOWED_TYPES.has(event.type)) continue;
+
+      const repoName = event.repo?.name ?? '';
+      const org = repoName.split('/')[0];
+      const company = orgToCompany[org];
+      if (!company) continue;
+
+      const createdAt = event.created_at;
+      if (!createdAt) { droppedNoTimestamp++; continue; }
+      if (!event.id) { droppedNoId++; continue; }
+
+      const yearMonth = new Date(createdAt).toISOString().slice(0, 7);
+      const techTags = [...extractTags(event)];
+      const isAI = detectAI(event);
+
+      batch.push({
+        company,
+        org_name: org,
+        year_month: yearMonth,
+        event_time: createdAt,
+        event_id: String(event.id),
+        event_type: event.type,
+        repo_name: repoName,
+        actor_login: event.actor?.login ?? '',
+        is_ai: isAI,
+        tech_tags: techTags,
+      });
+      totalEmitted++;
+
+      if (batch.length >= EVENT_BATCH_SIZE) flushBatch();
+    }
+
+    flushBatch();
+    parentPort.postMessage({
+      type: 'fileDone',
+      hourId,
+      totalEmitted,
+      droppedNoTimestamp,
+      droppedNoId,
+    });
+  } catch (err) {
+    try { rl?.close(); } catch {}
+    try { fileStream?.destroy(); } catch {}
+    parentPort.postMessage({
+      type: 'workerError',
+      hourId,
+      message: err?.message ?? String(err),
+    });
+  }
+}

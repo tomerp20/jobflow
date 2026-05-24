@@ -8,22 +8,23 @@ set -euo pipefail
 MIN_FREE_GB=50
 HDD_MOUNT="/mnt/hdd"
 
-# Default: 1 year of data, matching the plan's stated yearly-coverage goal.
-# Override via env on the cron line, the operator's shell, or data-pipeline/.env
-# (the .env block below runs after this line, so an override there still wins).
-BACKFILL_START_DATE="${BACKFILL_START_DATE:-$(date -u -d '1 year ago' +%Y-%m-%d)}"
-
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DATA_PIPELINE_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd -- "${DATA_PIPELINE_ROOT}/.." && pwd)"
 
 # Load per-machine env (Cassandra contact points, GHARCHIVE_DIR, etc.) if present.
+# Source FIRST so that all per-machine overrides (including BACKFILL_START_DATE
+# and END_DATE) are in place before the `:-` fallbacks below pick defaults.
 if [ -f "${DATA_PIPELINE_ROOT}/.env" ]; then
   set -a
   # shellcheck disable=SC1091
   . "${DATA_PIPELINE_ROOT}/.env"
   set +a
 fi
+
+# Defaults applied only when nothing else (cron line, operator shell, .env) provided a value.
+# Default: 1 year of data, matching the plan's stated yearly-coverage goal.
+BACKFILL_START_DATE="${BACKFILL_START_DATE:-$(date -u -d '1 year ago' +%Y-%m-%d)}"
 
 # Mount + disk-space guard. Checking the mountpoint first surfaces "/mnt/hdd missing" as a real cause
 # rather than letting df fall back to the root filesystem and silently mislead the threshold check.
@@ -39,9 +40,13 @@ fi
 
 cd "${REPO_ROOT}"
 
-# Also set after .env source above — .env entries for END_DATE still win.
-# Keep this assignment here (not hoisted) so that ordering invariant holds.
+# Default END_DATE: yesterday (UTC). Applied only if neither cron line, operator shell,
+# nor .env set it.
 END_DATE="${END_DATE:-$(date -u -d 'yesterday' +%Y-%m-%d)}"
+
+# Headroom for libuv threadpool (default 4). 8 workers × 1 concurrent gunzip each
+# plus spare slots for fs IO. Cheap insurance, see ADR 0008.
+export UV_THREADPOOL_SIZE="${UV_THREADPOOL_SIZE:-16}"
 
 node data-pipeline/fetcher/fetcher.js --range "${BACKFILL_START_DATE}" "${END_DATE}"
 node data-pipeline/orchestrators/backfill.js

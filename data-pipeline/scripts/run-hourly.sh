@@ -34,5 +34,9 @@ fi
 
 cd "${REPO_ROOT}"
 
+# Headroom for libuv threadpool (default 4). 8 workers × 1 concurrent gunzip each
+# plus spare slots for fs IO. Cheap insurance, see ADR 0008.
+export UV_THREADPOOL_SIZE="${UV_THREADPOOL_SIZE:-16}"
+
 node data-pipeline/fetcher/fetcher.js --catchup
 node data-pipeline/orchestrators/hourly.js

@@ -65,6 +65,7 @@ Mirror `CONTEXT.md` terms. Each page adds *system context* the glossary cannot c
 - [[adr-0004-microservices-shaped-cli-contract]] → `/docs/adr/0004-microservices-shaped-cli-contract.md`
 - [[adr-0005-processed-files-hourly-only]] → `/docs/adr/0005-processed-files-hourly-only.md`
 - [[adr-0007-processed-files-single-partition]] → `/docs/adr/0007-processed-files-single-partition.md`
+- [[adr-0008-ingester-worker-side-decompression]] → `/docs/adr/0008-ingester-worker-side-decompression.md`
 
 ## References (external systems & infrastructure)
 
