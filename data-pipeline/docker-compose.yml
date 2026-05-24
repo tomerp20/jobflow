@@ -9,6 +9,13 @@ services:
       - MAX_HEAP_SIZE=4G
       - HEAP_NEWSIZE=800M
       - CASSANDRA_CLUSTER_NAME=jobflow
+      # Open JMX so the Reaper container can connect to Cassandra over JMX.
+      # LOCAL_JMX=no turns off the default localhost-only bind. The JVM extra
+      # opts disable JMX authentication (acceptable on a single-host learning
+      # deployment) and pin the RMI hostname so Reaper can resolve back to the
+      # Cassandra service.
+      - LOCAL_JMX=no
+      - JVM_EXTRA_OPTS=-Djava.rmi.server.hostname=cassandra -Dcom.sun.jndi.rmiregistry.noLocalStubs=true -Dcom.sun.management.jmxremote.authenticate=false
     volumes:
       - /home/tomer/cassandra-data:/var/lib/cassandra
     healthcheck:
@@ -25,6 +32,12 @@ services:
     environment:
       - REAPER_STORAGE_TYPE=memory
       - REAPER_CASS_CONTACT_POINTS=[cassandra]
+      # Disable Reaper's access-control layer. Without this, the latest Reaper
+      # image refuses to start with "ACCESS CONTROL: User configuration missing
+      # username" because the default config block points at users that aren't
+      # defined. Disabling auth is acceptable for a single-host learning
+      # deployment behind LAN-only port exposure.
+      - REAPER_AUTH_ENABLED=false
     depends_on:
       cassandra:
         condition: service_healthy
