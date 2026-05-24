@@ -13,6 +13,8 @@ Each entry: **what happened → what we'd change**. Skip generic platitudes.
 
 ---
 
+- **2026-05-24 — slice 4 ship (PR #249).** Edits made in the main working dir (on the wrong slice-3 branch) were copied to the worktree via `cp` before staging — the worktree isolation pattern means all Edit/Write calls must target the worktree path directly, not the main jobflow dir. → When shipping in a worktree context, always compute the absolute worktree path and pass it to Edit/Write from the start; don't rely on the main checkout.
+
 ## 2026-05-24 (PR #248 — Company Scout slice 3)
 
 - **Anchor prefix sweep requires an explicit login-prefix filter after `searchOrgs`.** `searchOrgs("wix-")` returns any org whose name or login contains "wix-", not just those whose login literally starts with `wix-`. Always filter results with `login.toLowerCase().startsWith(anchor + "-")` before scoring — otherwise unrelated orgs that happen to contain the anchor substring get the W_ANCHOR_PREFIX_SIBLING bonus. This filter is in `orgResolver.ts:prefixResults.filter`.

@@ -1,26 +1,26 @@
 import logger from '../../config/logger';
-import { LoggingCompanyRegistry, type CompanyRegistry } from './companyRegistry';
+import { resolveRegistry, type CompanyRegistry } from './companyRegistry';
 import { resolveOrgs } from './orgResolver';
 import { listOrgRepos } from './githubClient';
 import { latestActivePush } from './activePresenceClassifier';
 
 // The registry singleton is resolved once at module load time.
-// HttpShimCompanyRegistry (slice #184) will be swapped in here when
-// COMPANY_REGISTRY_URL is configured; for now LoggingCompanyRegistry is the
-// only implementation.
-const registry: CompanyRegistry = new LoggingCompanyRegistry();
+// HttpShimCompanyRegistry is used when COMPANY_REGISTRY_URL is set (production);
+// LoggingCompanyRegistry is the dev fallback (COMPANY_REGISTRY_URL unset).
+const registry: CompanyRegistry = resolveRegistry();
 
 /**
  * Runs the Company Scout for a Company on its First Sighting.
  *
- * Full end-to-end flow (slice #183):
+ * Full end-to-end flow (slices #181–#184):
  *   1. Org Resolver → accepted candidate Orgs (slug probe + search + prefix sweep).
  *   2. For each accepted Org: listOrgRepos → Active-Presence Classifier.
  *   3. Keep only Orgs with Active GitHub Presence.
  *   4. Build the activeOrgs payload and hand off to CompanyRegistry.register.
  *
- * In this slice the registry is LoggingCompanyRegistry — real `registered` /
- * `already_exists` statuses arrive in slice #184 with the HTTPS shim client.
+ * In production (COMPANY_REGISTRY_URL set) the registry is HttpShimCompanyRegistry
+ * which returns real `registered` / `already_exists` statuses from the shim.
+ * In dev (URL unset) LoggingCompanyRegistry is the fallback.
  *
  * ---
  * ACCEPTED EDGE CASE — gmailSync transaction-boundary race:
@@ -118,7 +118,8 @@ export async function runCompanyCheck(
     }
 
     // ------------------------------------------------------------------
-    // Step 3 — Hand off to registry (LoggingCompanyRegistry in this slice)
+    // Step 3 — Hand off to registry (HttpShimCompanyRegistry in production;
+    //           LoggingCompanyRegistry when COMPANY_REGISTRY_URL is unset)
     // ------------------------------------------------------------------
 
     await registry.register(companyName, activeOrgs);
