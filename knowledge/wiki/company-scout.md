@@ -11,7 +11,7 @@ sources:
 related: [[application]] [[company]] [[first-sighting]] [[org]] [[active-github-presence]] [[cassandra-analytics-pipeline]] [[backfill]] [[hourly-ingest]] [[email-agent]] [[adr-0003-backfill-hourly-relay-race]] [[adr-0009-org-scorer-weighted-scoring]] [[adr-0010-https-shim-write-path]]
 updated: 2026-05-24
 status: stable
-shipped: "#181 (slice 1), #182 (slice 2 — PR #247), #183 (slice 3 — PR #248)"
+shipped: "#181 (slice 1), #182 (slice 2 — PR #247), #183 (slice 3 — PR #248), #246 (shim — PR #250)"
 ---
 
 # Company Scout
@@ -71,7 +71,7 @@ The analytics pipeline can't profile a Company until its `(Company, Org)` rows e
 - Active-Presence Classifier: `backend/src/services/companyScout/activePresenceClassifier.ts` (shipped — slice 3 / PR #248)
 - GitHub API client: `backend/src/services/companyScout/githubClient.ts` (shipped — slice 2 / PR #247)
 - OrgScorer module: `backend/src/services/companyScout/orgScorer.ts` (shipped — slice 2 / PR #247)
-- HTTPS shim: separate deliverable in `data-pipeline/` repo (not in JobFlow)
+- HTTPS shim: `data-pipeline/shim/shim.js` — Node ESM service; deploy config in `data-pipeline/shim/deploy/` (shipped — PR #250)
 - Cassandra schema: `data-pipeline/schema/004_companies.cql` + `005_alter_companies_initialized.cql`
 - Canonical pipeline design: `docs/CassandraPlan.md` §4.4 (`companies` table)
 - Related ADRs: [[adr-0003-backfill-hourly-relay-race]], [[adr-0009-org-scorer-weighted-scoring]], [[adr-0010-https-shim-write-path]]

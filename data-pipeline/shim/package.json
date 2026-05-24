@@ -1,0 +1,20 @@
+{
+  "name": "jobflow-company-shim",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "HTTPS write shim: registers (company, org) pairs into jobflow.companies via INSERT … IF NOT EXISTS",
+  "main": "shim.js",
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "scripts": {
+    "start": "node --env-file=.env shim.js"
+  },
+  "dependencies": {
+    "cassandra-driver": "^4.7.2",
+    "pino": "^9.0.0"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13.0.0"
+  }
+}
