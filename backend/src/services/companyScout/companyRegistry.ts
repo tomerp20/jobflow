@@ -15,12 +15,13 @@ export interface CompanyRegistry {
  * HttpShimCompanyRegistry (slice #184) is the production implementation.
  */
 export class LoggingCompanyRegistry implements CompanyRegistry {
-  async register(company: string, activeOrgs: ActiveOrg[]): Promise<void> {
+  register(company: string, activeOrgs: ActiveOrg[]): Promise<void> {
     logger.info('company_registry.would_register', {
       service: 'company-scout',
       company,
       active_org_count: activeOrgs.length,
       active_orgs: activeOrgs,
     });
+    return Promise.resolve();
   }
 }
