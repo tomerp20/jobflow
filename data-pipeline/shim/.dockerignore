@@ -1,0 +1,10 @@
+# Anything we do not want copied into the image build context.
+node_modules
+npm-debug.log
+.env
+.env.*
+!.env.example
+Dockerfile
+.dockerignore
+RUNBOOK.md
+deploy

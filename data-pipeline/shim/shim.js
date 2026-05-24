@@ -4,7 +4,8 @@ import pino from 'pino';
 import { buildClient, insertIfNotExists } from './lib/cassandra.js';
 
 // ── Env config ───────────────────────────────────────────────────────────────
-const SHIM_PORT            = parseInt(process.env.SHIM_PORT ?? '3100', 10);
+const SHIM_PORT            = parseInt(process.env.SHIM_PORT ?? '3333', 10);
+const SHIM_BIND_ADDRESS    = process.env.SHIM_BIND_ADDRESS ?? '127.0.0.1';
 const SHIM_BEARER_TOKEN    = process.env.SHIM_BEARER_TOKEN ?? '';
 const CASSANDRA_CONTACT_POINTS = (process.env.CASSANDRA_CONTACT_POINTS ?? '').split(',').map(s => s.trim()).filter(Boolean);
 const CASSANDRA_LOCAL_DC   = process.env.CASSANDRA_LOCAL_DC ?? '';
@@ -157,8 +158,8 @@ async function main() {
   logger.info({ contactPoints: CASSANDRA_CONTACT_POINTS, keyspace: CASSANDRA_KEYSPACE }, 'cassandra connected');
 
   const server = http.createServer(async (req, res) => {
-    // Liveness check — Caddy passes /health through; useful for `curl` from
-    // RUNBOOK and for future external monitoring without needing the bearer.
+    // Liveness check — unauthenticated; used by the RUNBOOK smoke test
+    // and any external monitor (e.g. ngrok proxies it as-is, no header needed).
     if (req.method === 'GET' && req.url === '/health') {
       return send(res, 200, { status: 'ok' });
     }
@@ -178,8 +179,8 @@ async function main() {
   server.requestTimeout = 30_000; // 30s overall request
   server.headersTimeout = 10_000; // 10s to receive request headers
 
-  server.listen(SHIM_PORT, '127.0.0.1', () => {
-    logger.info({ port: SHIM_PORT }, 'shim listening on localhost');
+  server.listen(SHIM_PORT, SHIM_BIND_ADDRESS, () => {
+    logger.info({ port: SHIM_PORT, bind: SHIM_BIND_ADDRESS }, 'shim listening');
   });
 
   // Graceful shutdown: allow in-flight requests to drain before closing Cassandra.
