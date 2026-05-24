@@ -11,7 +11,7 @@ sources:
 related: [[application]] [[company]] [[first-sighting]] [[org]] [[active-github-presence]] [[cassandra-analytics-pipeline]] [[backfill]] [[hourly-ingest]] [[email-agent]] [[adr-0003-backfill-hourly-relay-race]] [[adr-0009-org-scorer-weighted-scoring]] [[adr-0010-https-shim-write-path]]
 updated: 2026-05-24
 status: stable
-shipped: "#181 (slice 1), #182 (slice 2 — PR #247)"
+shipped: "#181 (slice 1), #182 (slice 2 — PR #247), #183 (slice 3 — PR #248)"
 ---
 
 # Company Scout
@@ -66,7 +66,9 @@ The analytics pipeline can't profile a Company until its `(Company, Org)` rows e
 ## Source pointers
 
 - Trigger site: `backend/src/services/cardService.ts` (in `createCard`)
-- Scout orchestrator: `backend/src/services/companyScout/companyScout.ts` (skeleton — slice 1); `companyRegistry.ts` (LoggingCompanyRegistry — slice 1)
+- Scout orchestrator: `backend/src/services/companyScout/companyScout.ts` (wired end-to-end — slice 3 / PR #248); `companyRegistry.ts` (LoggingCompanyRegistry — slice 1)
+- Org Resolver: `backend/src/services/companyScout/orgResolver.ts` (shipped — slice 3 / PR #248)
+- Active-Presence Classifier: `backend/src/services/companyScout/activePresenceClassifier.ts` (shipped — slice 3 / PR #248)
 - GitHub API client: `backend/src/services/companyScout/githubClient.ts` (shipped — slice 2 / PR #247)
 - OrgScorer module: `backend/src/services/companyScout/orgScorer.ts` (shipped — slice 2 / PR #247)
 - HTTPS shim: separate deliverable in `data-pipeline/` repo (not in JobFlow)
