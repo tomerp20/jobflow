@@ -32,7 +32,7 @@ async function main() {
 
   logger.info({ count: hours.length }, 'starting downloads');
 
-  const limit = pLimit(3);
+  const limit = pLimit(6);
 
   const settled = await Promise.allSettled(
     hours.map((hourId) =>
@@ -86,7 +86,7 @@ async function runCatchup(root, log) {
 
   log.info({ count: candidates.length, from: candidates[0], to: candidates[candidates.length - 1] }, 'starting catchup walk');
 
-  const limit = pLimit(3);
+  const limit = pLimit(6);
   let found404 = false;
 
   // All candidates are enqueued; p-limit starts up to 3 concurrently.
