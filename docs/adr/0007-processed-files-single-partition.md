@@ -17,41 +17,38 @@ The root insight: because the hourly ingester processes files strictly in chrono
 
 ## Decision
 
-Restructure `processed_files` with a `(bucket, file_name)` composite primary key and `CLUSTERING ORDER BY (file_name DESC)`. All rows use `bucket = 'singleton'`.
+Restructure `processed_files` with `(bucket, hour_time)` as the primary key, where `hour_time` is a `timestamp` derived from `file_name` on write. All rows use `bucket = 'singleton'`. `file_name` is stored as a regular column.
 
 ```cql
 CREATE TABLE processed_files (
     bucket       text,
+    hour_time    timestamp,
     file_name    text,
     processed_at timestamp,
-    PRIMARY KEY (bucket, file_name)
-) WITH CLUSTERING ORDER BY (file_name DESC);
+    PRIMARY KEY (bucket, hour_time)
+) WITH CLUSTERING ORDER BY (hour_time DESC);
 ```
 
-Catchup query becomes a single round-trip (paged scan of the singleton partition):
+Catchup query is a true O(1) key lookup:
 
 ```cql
-SELECT file_name FROM processed_files WHERE bucket='singleton';
+SELECT file_name FROM processed_files WHERE bucket='singleton' LIMIT 1;
 ```
 
-The chronological max is computed in JS via `hourIdToMs()`. Catchup logic becomes:
-`pending = ondisk.filter(id => hourIdToMs(id) > hourIdToMs(max))`.
+Cassandra timestamps sort chronologically, so `LIMIT 1` on the `hour_time DESC` clustering column returns the latest processed hour directly — no JS iteration over the partition needed.
 
-A `LIMIT 1` plus lexicographic ordering does **not** work because the canonical
-hour ID format is `YYYY-MM-DD-H` (hour unpadded, 0–23) — string compare yields
-`'2025-05-01-9' > '2025-05-01-10'`, which would silently skip 14 of every 24
-hours per day. Computing the max chronologically via `hourIdToMs` avoids this.
-Scanning the whole partition stays cheap because it is bounded (~9k rows/year of
-hourly ingest; ~26k after 3 years) and is a single paged round-trip.
+On write, `markFileProcessed(fileName)` converts `file_name → hour_time` once via `hourIdToMs()`. The canonical hour ID format is `YYYY-MM-DD-H` (hour unpadded, 0–23); clustering on `file_name text` directly would sort lexicographically and break `LIMIT 1` (`'…-9' > '…-10'` as strings). A `timestamp` column avoids this entirely.
+
+Catchup filter: `pending = ondisk.filter(id => hourIdToMs(id) > hourIdToMs(max))`.
 
 The `event_count` and `filtered_count` columns from the original schema are dropped — they were never read back, only written for ad-hoc observability.
 
 ## Consequences
 
 **Positive:**
-- Catchup startup is now O(1) regardless of on-disk archive size.
+- Catchup startup is O(1): one `LIMIT 1` key lookup, no partition scan, no JS loop.
 - `BusyConnectionError` cannot recur from this code path.
-- Schema is simpler (two PK columns, one data column).
+- Timestamp clustering is semantically correct and self-documenting.
 
 **Negative / trade-offs:**
 - **Hot partition anti-pattern:** all rows land in the single `bucket='singleton'` partition. On a single-node Cassandra deployment this is acceptable — there is no intra-cluster imbalance. If the deployment ever becomes multi-node, this partition will become a hotspot and would need repartitioning (e.g. `bucket = YYYY` to spread across 12+ partitions per year).
@@ -64,6 +61,8 @@ The `event_count` and `filtered_count` columns from the original schema are drop
 2. **Serialize the per-file checks** — fixes the concurrency issue but adds O(N) sequential round-trips to catchup startup.
 3. **Truncate `processed_files` between catchup runs** — would break the hourly idempotency invariant (hourly mode relies on the table persisting across invocations).
 4. **`bucket = YYYY` partitioning** — correct for multi-node but unnecessary complexity for the current single-node deployment.
+5. **Zero-pad `file_name` on write, cluster on `file_name DESC`** — would make lexicographic order match chronological order and allow `LIMIT 1`. Rejected: requires a string transformation convention that isn't enforced by the type system; timestamp clustering expresses the intent directly and is enforced by Cassandra.
+6. **Partition scan + JS max** — was applied as an intermediate fix by the code reviewer. Correct but O(N) in partition size; superseded by the timestamp clustering approach.
 
 ## Related
 
