@@ -40,6 +40,10 @@ const schema = z.object({
     ctx.addIssue({ code: 'custom', path: ['COMPANY_REGISTRY_TOKEN'], message: 'COMPANY_REGISTRY_TOKEN is required when COMPANY_REGISTRY_URL is set' });
   }
 
+  if (v.COMPANY_REGISTRY_URL && !v.COMPANY_REGISTRY_URL.startsWith('https://')) {
+    ctx.addIssue({ code: 'custom', path: ['COMPANY_REGISTRY_URL'], message: 'COMPANY_REGISTRY_URL must use https:// in production (bearer token must not be sent in plaintext)' });
+  }
+
   for (const [k, defaultVal] of [
     ['CORS_ORIGIN', 'http://localhost:5173'],
     ['BACKEND_URL', 'http://localhost:3001'],

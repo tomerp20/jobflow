@@ -12,7 +12,7 @@ const registry: CompanyRegistry = resolveRegistry();
 /**
  * Runs the Company Scout for a Company on its First Sighting.
  *
- * Full end-to-end flow (slice #183):
+ * Full end-to-end flow (slices #181–#184):
  *   1. Org Resolver → accepted candidate Orgs (slug probe + search + prefix sweep).
  *   2. For each accepted Org: listOrgRepos → Active-Presence Classifier.
  *   3. Keep only Orgs with Active GitHub Presence.
