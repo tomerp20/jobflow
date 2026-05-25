@@ -10,7 +10,7 @@ sources:
   - data-pipeline/ingester/
   - data-pipeline/orchestrators/
 related: [[cassandra-analytics-pipeline]] [[backfill]] [[hourly-ingest]] [[gh-archive]] [[tracked-event]] [[adr-0003-backfill-hourly-relay-race]] [[adr-0004-microservices-shaped-cli-contract]] [[adr-0005-processed-files-hourly-only]] [[adr-0007-processed-files-single-partition]] [[adr-0008-ingester-worker-side-decompression]] [[infra-linux-deployment]]
-updated: 2026-05-24
+updated: 2026-05-25
 status: stable
 ---
 
@@ -57,7 +57,7 @@ Every per-job parameter is a CLI arg (URL-encoded for tokens with special chars 
 - **Worker owns decompression.** Each worker streams its own file from `GHARCHIVE_DIR`. Main thread no longer touches `createReadStream`/`createGunzip`/`createInterface`.
 - **Chronological finalize.** Workers may complete files out of wall-clock order; main buffers `fileDone` events and writes `processed_files` / `backfill_progress` strictly in input order so the contiguous-prefix invariant from [[adr-0005-processed-files-hourly-only]] holds.
 - **Backpressure.** Main holds off dispatching the next file when events-in-flight to Cassandra exceeds 10K. Mid-file workers keep producing; Cassandra is 99.4% idle today so the watermark rarely fires.
-- **Failure semantics.** First worker error or Cassandra write error stops dispatch. Remaining in-flight writes are awaited so the pool terminates cleanly with `exitCode=1`.
+- **Failure semantics.** First non-ENOENT worker error or Cassandra write error stops dispatch. Remaining in-flight writes are awaited so the pool terminates cleanly with `exitCode=1`. Missing-file (`ENOENT`) errors are downgraded to per-hour skips: the worker reports `fileMissing` (vs the generic `workerError`) and the main thread continues the batch. In backfill mode, skipped hours are tallied per-date and the date still gets a `backfill_progress` row with `events_written` reflecting only the present hours — so the next nightly run does not retry a permanent archive gap. A non-ENOENT error on one date logs and `continue`s to the next date (no longer wedges the rest of the run) but still sets `exitCode=1` so the orchestrator marks the run `failed`.
 
 ## Surprises / gotchas
 
@@ -66,6 +66,7 @@ Every per-job parameter is a CLI arg (URL-encoded for tokens with special chars 
 - "Catchup" is the **hourly fetcher's** mode (resumption after a gap). Don't confuse with [[backfill]] which is the nightly all-rows sweep.
 - In backfill mode, per-partition batch buffers in `cassandra-writer.js` now contain events from multiple hours concurrently. Correctness is preserved (Cassandra dedups via the full primary key + `flushAllPartitionBuffers` runs at date boundary before `backfill_progress` is written), but reasoning about the buffer content requires this awareness.
 - `UV_THREADPOOL_SIZE=16` is set by `run-{backfill,hourly}.sh` to give libuv headroom for 8 workers × 1 concurrent gunzip each. Operator overrides via the cron line still win.
+- Missing GH Archive files (`ENOENT`) are tolerated at per-hour granularity in backfill mode. The orchestrator's `diskBounds.earliest` can point at a date whose hour files are not all present (e.g. a permanent gap from a 404 the Fetcher saw historically); the Ingester writes a `backfill_progress` row with `events_written=0` for that date and continues. Without this, a single missing hour wedged every nightly run from that date forward (see issue #255 / PR for the production incident on `2025-01-08`).
 
 ## Source pointers
 

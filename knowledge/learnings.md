@@ -13,6 +13,8 @@ Each entry: **what happened → what we'd change**. Skip generic platitudes.
 
 ---
 
+- **2026-05-25 — backfill missing-file tolerance (issue #255).** A single ENOENT in the worker tripped the per-date catch in ingester.js whose `break` then abandoned every later date, and the orchestrator marked the entire `backfill_runs` row failed — so each subsequent nightly run hit the same gap and failed the same way. Fix: distinguish ENOENT in worker.js (post `fileMissing` instead of `workerError`), let the main thread skip-and-continue, change the per-date `break` to `continue`, and still write `backfill_progress` for fully/partially-empty days so the next run does not retry the gap. → Per-file/per-day skip semantics for permanent archive gaps belong in the layer that knows about the disk (ingester/worker), not in the orchestrator — keeps the orchestrator/fetcher decoupling intact while preventing a single 404 from wedging the nightly pipeline.
+
 - **2026-05-24 — slice 4 ship (PR #249).** Edits made in the main working dir (on the wrong slice-3 branch) were copied to the worktree via `cp` before staging — the worktree isolation pattern means all Edit/Write calls must target the worktree path directly, not the main jobflow dir. → When shipping in a worktree context, always compute the absolute worktree path and pass it to Edit/Write from the start; don't rely on the main checkout.
 
 ## 2026-05-24 (PR #248 — Company Scout slice 3)
