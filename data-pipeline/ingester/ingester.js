@@ -137,22 +137,44 @@ try {
     for (const [date, dateHours] of dateHoursMap) {
       try {
         const eventsWrittenForDate = await processHourBatch(dateHours);
-        // Flush remaining per-partition buffers accumulated across this date's files,
-        // then record date-level progress only after the flush lands in Cassandra.
-        await writer.flushAllPartitionBuffers();
-        await writer.writeBackfillProgress(cmd.runId, date, eventsWrittenForDate);
+
+        // Emit the missing-hours warn before flush/writeBackfillProgress so a
+        // downstream throw (Cassandra flush failure, progress-write failure)
+        // does not silently swallow the signal that this date was partial.
+        // missingHoursByDate is fully populated by processHourBatch above —
+        // the fileMissing handler appends to it during dispatch.
         const missingForDate = missingHoursByDate.get(date) ?? [];
         if (missingForDate.length > 0) {
           logger.warn(
             { date, missingCount: missingForDate.length, missingHours: missingForDate },
-            'date completed with missing hours — partial backfill_progress row written'
+            'date had missing hours — events_written will reflect only present hours'
           );
         }
+
+        // Flush remaining per-partition buffers accumulated across this date's files,
+        // then record date-level progress only after the flush lands in Cassandra.
+        await writer.flushAllPartitionBuffers();
+        await writer.writeBackfillProgress(cmd.runId, date, eventsWrittenForDate);
         logger.info({ date, eventsWritten: eventsWrittenForDate }, 'date complete — backfill_progress written');
       } catch (err) {
         // A non-ENOENT error on this date does not wedge later dates. ENOENT
         // errors arrive as fileMissing messages (handled in attachWorker) and
         // never reach this catch — they cannot trip exitCode on their own.
+        //
+        // Best-effort flush of any partial per-partition buffer state left
+        // behind by the failed date. Without this, leftover events from the
+        // failed date can land in the next date's flush and get mis-counted
+        // in that date's backfill_progress.events_written. Cassandra dedups
+        // on the full PK (ADR 0005) so re-flushing the same events on a future
+        // retry is safe; the goal here is just accurate per-date accounting.
+        try {
+          await writer.flushAllPartitionBuffers();
+        } catch (flushErr) {
+          logger.error(
+            { date, err: flushErr.message },
+            'failed to flush dangling buffers after date error — subsequent date counts may be inflated'
+          );
+        }
         logger.error(
           { date, partition: err.partitionKey ?? null, sampleEventId: err.sampleEventId ?? null, err: err.message },
           'date errored — skipping, continuing to next date'
