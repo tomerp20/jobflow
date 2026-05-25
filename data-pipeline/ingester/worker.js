@@ -100,23 +100,10 @@ async function processFile(hourId, filePath) {
   } catch (err) {
     try { rl?.close(); } catch {}
     try { fileStream?.destroy(); } catch {}
-    if (err?.code === 'ENOENT') {
-      // Missing source file is a tolerable outcome — the GH Archive may have
-      // gaps and the orchestrator's diskBounds.earliest can point at a date
-      // whose hours are not all present. Surface as a distinct message type so
-      // the main thread can skip-and-continue rather than abort the batch.
-      parentPort.postMessage({
-        type: 'fileMissing',
-        hourId,
-        filePath,
-        message: err.message,
-      });
-    } else {
-      parentPort.postMessage({
-        type: 'workerError',
-        hourId,
-        message: err?.message ?? String(err),
-      });
-    }
+    parentPort.postMessage({
+      type: 'workerError',
+      hourId,
+      message: err?.message ?? String(err),
+    });
   }
 }

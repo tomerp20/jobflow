@@ -1,4 +1,5 @@
 import { Worker } from 'worker_threads';
+import { existsSync } from 'node:fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -116,12 +117,6 @@ const workerPool = spawnWorkers(INGEST_WORKERS);
 
 let exitCode = 0;
 
-// Per-date tally of hour files that returned ENOENT in the worker. Module-scope
-// because the worker-message handler (inside processHourBatch) and the per-date
-// loop both need access — the handler appends, the loop reads to log a summary
-// line before moving on. Keyed by YYYY-MM-DD; values are arrays of hourIds.
-const missingHoursByDate = new Map();
-
 try {
   if (cmd.mode === 'backfill' && cmd.verb === 'range') {
     // Group hourIds by date for per-date backfill_progress tracking.
@@ -136,18 +131,48 @@ try {
 
     for (const [date, dateHours] of dateHoursMap) {
       try {
-        const eventsWrittenForDate = await processHourBatch(dateHours);
+        // Pre-flight existence check. The orchestrator's range may include
+        // dates the Fetcher never downloaded (permanent GH Archive gaps,
+        // leftover dates outside the current Fetcher window, etc.). Filtering
+        // up front means workers are never spawned for missing files and the
+        // per-date backfill_progress row records exactly what was processed.
+        const dateDir = path.dirname(hourIdToPath(GHARCHIVE_DIR, dateHours[0]));
+        const presentHours = [];
+        const missingHours = [];
+        if (!existsSync(dateDir)) {
+          logger.warn({ date, dateDir }, 'date directory missing on disk — skipping all hours');
+          missingHours.push(...dateHours);
+        } else {
+          for (const hourId of dateHours) {
+            const filePath = hourIdToPath(GHARCHIVE_DIR, hourId);
+            if (existsSync(filePath)) {
+              presentHours.push(hourId);
+            } else {
+              logger.warn({ hourId, filePath }, 'hour file missing on disk — skipping');
+              missingHours.push(hourId);
+            }
+          }
+        }
 
-        // Emit the missing-hours warn before flush/writeBackfillProgress so a
-        // downstream throw (Cassandra flush failure, progress-write failure)
-        // does not silently swallow the signal that this date was partial.
-        // missingHoursByDate is fully populated by processHourBatch above —
-        // the fileMissing handler appends to it during dispatch.
-        const missingForDate = missingHoursByDate.get(date) ?? [];
-        if (missingForDate.length > 0) {
+        // If every hour is missing, still write a backfill_progress row with
+        // events_written=0 so the next nightly run does not re-process this
+        // permanent gap. Skip the worker dispatch entirely.
+        if (presentHours.length === 0) {
+          await writer.writeBackfillProgress(cmd.runId, date, 0);
+          logger.info({ date, missingCount: missingHours.length }, 'date had no present hours — empty backfill_progress row written');
+          continue;
+        }
+
+        const eventsWrittenForDate = await processHourBatch(presentHours);
+
+        // Emit a partial-completion warn before flush/writeBackfillProgress so a
+        // downstream throw does not silently swallow the signal that this date
+        // was partial. presentHours.length < 24 means we already know some
+        // hours were absent.
+        if (missingHours.length > 0) {
           logger.warn(
-            { date, missingCount: missingForDate.length, missingHours: missingForDate },
-            'date had missing hours — events_written will reflect only present hours'
+            { date, missingCount: missingHours.length, missingHours },
+            'date had missing hours — events_written reflects only present hours'
           );
         }
 
@@ -155,11 +180,15 @@ try {
         // then record date-level progress only after the flush lands in Cassandra.
         await writer.flushAllPartitionBuffers();
         await writer.writeBackfillProgress(cmd.runId, date, eventsWrittenForDate);
-        logger.info({ date, eventsWritten: eventsWrittenForDate }, 'date complete — backfill_progress written');
+        logger.info(
+          { date, eventsWritten: eventsWrittenForDate, presentHoursCount: presentHours.length, missingHoursCount: missingHours.length },
+          'date complete — backfill_progress written'
+        );
       } catch (err) {
-        // A non-ENOENT error on this date does not wedge later dates. ENOENT
-        // errors arrive as fileMissing messages (handled in attachWorker) and
-        // never reach this catch — they cannot trip exitCode on their own.
+        // Non-existence errors are filtered upfront. Anything that lands here is
+        // a real failure (Cassandra write, gunzip corruption, JSON parse blow-up,
+        // worker thread crash). Continue to the next date rather than wedging
+        // the rest of the run, but flag the run as failed via exitCode=1.
         //
         // Best-effort flush of any partial per-partition buffer state left
         // behind by the failed date. Without this, leftover events from the
@@ -384,22 +413,6 @@ async function processHourBatch(orderedHourIds) {
         busyWorkers--;
         readyWorkers.push(worker);
         checkTerminalCondition();
-      } else if (msg.type === 'fileMissing') {
-        // ENOENT on the .json.gz file is treated as a per-hour skip — log and
-        // keep the batch going. The hour is recorded with zero events emitted
-        // so the chronological finalize loop can finalize it like any other
-        // completed file, and the per-date summary tally tracks it for the
-        // date-level warn line.
-        logger.warn({ hourId: msg.hourId, filePath: msg.filePath }, 'hour file missing — skipping');
-        const date = msg.hourId.slice(0, 10);
-        if (!missingHoursByDate.has(date)) missingHoursByDate.set(date, []);
-        missingHoursByDate.get(date).push(msg.hourId);
-        statsByHour.set(msg.hourId, { totalEmitted: 0, droppedNoTimestamp: 0, droppedNoId: 0 });
-        dispatchedAll.add(msg.hourId);
-        busyWorkers--;
-        readyWorkers.push(worker);
-        tryDispatch();
-        tryFinalize();
       }
     });
 
