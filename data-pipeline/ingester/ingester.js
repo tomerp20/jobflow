@@ -116,6 +116,12 @@ const workerPool = spawnWorkers(INGEST_WORKERS);
 
 let exitCode = 0;
 
+// Per-date tally of hour files that returned ENOENT in the worker. Module-scope
+// because the worker-message handler (inside processHourBatch) and the per-date
+// loop both need access — the handler appends, the loop reads to log a summary
+// line before moving on. Keyed by YYYY-MM-DD; values are arrays of hourIds.
+const missingHoursByDate = new Map();
+
 try {
   if (cmd.mode === 'backfill' && cmd.verb === 'range') {
     // Group hourIds by date for per-date backfill_progress tracking.
@@ -135,14 +141,24 @@ try {
         // then record date-level progress only after the flush lands in Cassandra.
         await writer.flushAllPartitionBuffers();
         await writer.writeBackfillProgress(cmd.runId, date, eventsWrittenForDate);
+        const missingForDate = missingHoursByDate.get(date) ?? [];
+        if (missingForDate.length > 0) {
+          logger.warn(
+            { date, missingCount: missingForDate.length, missingHours: missingForDate },
+            'date completed with missing hours — partial backfill_progress row written'
+          );
+        }
         logger.info({ date, eventsWritten: eventsWrittenForDate }, 'date complete — backfill_progress written');
       } catch (err) {
+        // A non-ENOENT error on this date does not wedge later dates. ENOENT
+        // errors arrive as fileMissing messages (handled in attachWorker) and
+        // never reach this catch — they cannot trip exitCode on their own.
         logger.error(
           { date, partition: err.partitionKey ?? null, sampleEventId: err.sampleEventId ?? null, err: err.message },
-          'failed to process date — no backfill_progress row written'
+          'date errored — skipping, continuing to next date'
         );
         exitCode = 1;
-        break;
+        continue;
       }
     }
   } else {
@@ -346,6 +362,22 @@ async function processHourBatch(orderedHourIds) {
         busyWorkers--;
         readyWorkers.push(worker);
         checkTerminalCondition();
+      } else if (msg.type === 'fileMissing') {
+        // ENOENT on the .json.gz file is treated as a per-hour skip — log and
+        // keep the batch going. The hour is recorded with zero events emitted
+        // so the chronological finalize loop can finalize it like any other
+        // completed file, and the per-date summary tally tracks it for the
+        // date-level warn line.
+        logger.warn({ hourId: msg.hourId, filePath: msg.filePath }, 'hour file missing — skipping');
+        const date = msg.hourId.slice(0, 10);
+        if (!missingHoursByDate.has(date)) missingHoursByDate.set(date, []);
+        missingHoursByDate.get(date).push(msg.hourId);
+        statsByHour.set(msg.hourId, { totalEmitted: 0, droppedNoTimestamp: 0, droppedNoId: 0 });
+        dispatchedAll.add(msg.hourId);
+        busyWorkers--;
+        readyWorkers.push(worker);
+        tryDispatch();
+        tryFinalize();
       }
     });
 
