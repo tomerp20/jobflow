@@ -10,12 +10,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Gmail Sync
+        # Capture the response body even on HTTP error. The previous version used
+        # `bash -e` + `RESPONSE=$(curl --fail-with-body ...)`: on a non-2xx, the
+        # assignment failed and the shell exited before `echo "$RESPONSE"` ran,
+        # so failures showed only "exit code 22" with no body. We now disable
+        # errexit around the curl, always print the response, and exit explicitly
+        # on non-2xx so the step still fails loudly.
         run: |
+          set +e
           RESPONSE=$(curl --fail-with-body \
             -s -w "\nHTTP_STATUS:%{http_code}" \
             -X POST "${{ secrets.RENDER_SYNC_URL }}/api/gmail/sync" \
             -H "Authorization: Bearer ${{ secrets.CRON_API_KEY }}" \
             -H "Content-Type: application/json")
+          CURL_EXIT=$?
           echo "$RESPONSE"
           HTTP_CODE=$(echo "$RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
-          echo "HTTP status: $HTTP_CODE"
+          echo "HTTP status: $HTTP_CODE (curl exit: $CURL_EXIT)"
+          if [ "$CURL_EXIT" -ne 0 ]; then
+            exit "$CURL_EXIT"
+          fi
