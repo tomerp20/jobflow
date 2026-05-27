@@ -9,6 +9,9 @@ export interface GitHubOrg {
   name: string | null;
   public_repos: number;
   followers: number;
+  // Verified domain ownership (paid GitHub feature; nearly impossible to fake).
+  // Strong precision signal — see W_VERIFIED_ORG in orgScorer.
+  is_verified: boolean;
   // Public repos listed by listOrgRepos; absent from getOrg/searchOrgs responses.
   repos?: GitHubRepo[];
 }
@@ -106,12 +109,14 @@ export async function getOrg(login: string): Promise<GitHubOrg | null> {
     name: string | null;
     public_repos: number;
     followers: number;
+    is_verified?: boolean;
   };
   return {
     login: data.login,
     name: data.name ?? null,
     public_repos: data.public_repos,
     followers: data.followers,
+    is_verified: Boolean(data.is_verified),
   };
 }
 

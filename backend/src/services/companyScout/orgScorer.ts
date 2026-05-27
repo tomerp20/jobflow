@@ -20,14 +20,20 @@ export const W_MODERATE_SLUG         =  15; // substring + length-ratio ≥ 0.5
 export const W_EXACT_DISPLAY_NAME    =  50; // normalize(company) === normalize(org.name)
 export const W_MODERATE_DISPLAY_NAME =  15; // substring + length-ratio ≥ 0.5
 export const W_ATS_SLUG_AGREES       =  40; // ATS slug extracted from URL matches org login
-export const W_ATS_SLUG_DISAGREES    = -50; // ATS slug present but does NOT match org login
+export const W_ATS_SLUG_DISAGREES    = -20; // [LOCAL TEST] softened from -50 — was too aggressive for ATS platforms that use full legal names (Perion → perionnetworkltd ≠ Perion). Clean win in Option-E re-run (gained Perion, lost nothing).
 export const W_ANCHOR_PREFIX_SIBLING =  50; // org login starts with "<verified-anchor>-"
-export const W_REAL_ORG_REPOS        =  10; // org has ≥5 public non-fork repos
-export const W_REAL_ORG_FOLLOWERS    =  10; // org has ≥100 followers
+export const W_REAL_ORG_REPOS        =  10; // [REVERTED] back to 10 — boosting to 15 enabled prefix-sweep garbage (Salesforce-Kr1s-Dev, GeneSys-fatec, RISE-sait etc., all scoring exactly 80)
+export const W_REAL_ORG_FOLLOWERS    =  10; // [REVERTED] back to 10 — same reason; paired with W_REAL_ORG_REPOS
+export const W_VERIFIED_ORG          =  20; // [LOCAL TEST v2] org.is_verified === true — verified domain ownership. Recovers Tenable / large-corp anchors that lose on display-name-not-set; near-impossible to fake (paid feature).
 
 /**
- * Acceptance threshold — candidates scoring below this are rejected.
- * A single dial: lower for more coverage, raise to cut false positives.
+ * Acceptance threshold — single dial.
+ *
+ * Note: the search-fallback path applies an additional signal-based filter
+ * (see orgResolver.ts Pass 2) — candidate must have is_verified=true OR an
+ * exact slug match — instead of using a higher threshold. Per the Run-3
+ * evidence (a higher SEARCH threshold lost 8 real companies to filter 3
+ * false positives), threshold-based filtering on search was too blunt.
  */
 export const ORG_ACCEPT_THRESHOLD = 80;
 
@@ -40,6 +46,8 @@ export interface OrgCandidate {
   name: string | null;
   public_repos: number;
   followers: number;
+  /** GitHub `is_verified` flag — verified domain ownership; see W_VERIFIED_ORG. */
+  is_verified?: boolean;
   /** When present, non-fork count is used instead of public_repos for credibility scoring. */
   repos?: Array<{ fork: boolean; archived?: boolean }>;
   /**
@@ -206,6 +214,17 @@ export function scoreOrgCandidate(
   }
 
   if (candidate.followers >= 100) score += W_REAL_ORG_FOLLOWERS;
+
+  // -----------------------------------------------------------------------
+  // Verified-org signal — GitHub's is_verified flag (verified domain).
+  // -----------------------------------------------------------------------
+  //
+  // Strong, near-unforgeable positive. Distinguishes corporate orgs that
+  // proved domain ownership from "Salesforce-Kr1s-Dev"-style namesakes that
+  // can never get this flag. Recovers anchors like Tenable (was 70 from
+  // exact slug + credibility — 70+20 = 90 ≥ 80 threshold).
+
+  if (candidate.is_verified) score += W_VERIFIED_ORG;
 
   return score;
 }

@@ -54,6 +54,42 @@ export class HttpShimCompanyRegistry implements CompanyRegistry {
   }
 
   async register(company: string, activeOrgs: ActiveOrg[]): Promise<void> {
+    // ----- [LOCAL TEST DRY-RUN] -----------------------------------------
+    // Bypass the HTTPS shim entirely and append each register() call to a
+    // JSONL file at the repo root. Lets us evaluate a new scoring config
+    // against the full backfill without touching Cassandra.
+    //
+    // Reverse: `git checkout backend/src/services/companyScout/companyRegistry.ts`
+    {
+      const { appendFile } = await import('node:fs/promises');
+      const line = JSON.stringify({
+        ts: new Date().toISOString(),
+        company,
+        active_org_count: activeOrgs.length,
+        active_orgs: activeOrgs,
+      }) + '\n';
+      try {
+        await appendFile('/Users/itc/Desktop/jobflow/backfill-dry-run.jsonl', line);
+        for (const o of activeOrgs) {
+          logger.info('company_registry.dry_run_registered', {
+            service: 'company-scout',
+            company,
+            org: o.org_name,
+            last_repo_push: o.last_repo_push,
+          });
+        }
+      } catch (err: unknown) {
+        logger.warn('company_registry.dry_run_write_failed', {
+          service: 'company-scout',
+          company,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return;
+    }
+    // ----- end DRY-RUN ---------------------------------------------------
+
+    // eslint-disable-next-line @typescript-eslint/no-unreachable-code
     const controller = new AbortController();
     // Mirror the 3 s Clearbit timeout used elsewhere in the backend.
     const timer = setTimeout(() => controller.abort(), 3000);

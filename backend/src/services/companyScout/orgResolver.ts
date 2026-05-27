@@ -86,6 +86,7 @@ function toCandidate(org: GitHubOrg, anchorLogin?: string): OrgCandidate {
     name: org.name,
     public_repos: org.public_repos,
     followers: org.followers,
+    is_verified: org.is_verified,
     anchorLogin,
   };
 }
@@ -160,15 +161,26 @@ export async function resolveOrgs(
         const candidate = toCandidate(org);
         const score = scoreOrgCandidate(company, candidate, urlList);
 
+        // Round-4 identity gate (is_verified OR exact slug) reverted —
+        // empirically too strict: is_verified is rare in practice (only the
+        // Salesforce/Workday/Stripe-tier giants have it), so the gate dropped
+        // 10 real corporate orgs (AudioCodes-IT, Silverfort-old, getndazn,
+        // hunters-ai, scytaleio, ArtlistLtd, finout-io, foretellix2, ionix-io,
+        // realplaykk) to filter 3 known false positives. Net loss. Back to
+        // plain score threshold; rely on the +20 W_VERIFIED_ORG bonus + the
+        // -20 W_ATS_SLUG_DISAGREES softening as the only retained changes.
+        const accepted_here = score >= ORG_ACCEPT_THRESHOLD;
+
         logger.debug('company_scout.resolver.search_probe', {
           service: 'company-scout',
           company,
           login: org.login,
           score,
-          accepted: score >= ORG_ACCEPT_THRESHOLD,
+          is_verified: org.is_verified,
+          accepted: accepted_here,
         });
 
-        if (score >= ORG_ACCEPT_THRESHOLD) {
+        if (accepted_here) {
           accepted.push({ login: org.login, score });
         }
       }
