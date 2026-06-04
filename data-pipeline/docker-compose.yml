@@ -72,6 +72,14 @@ services:
       # Only contains SHIM_BEARER_TOKEN (the one secret). Created from
       # shim/.env.example on first deploy; not committed.
       - ./shim/.env
+    # whatsapp-web.js LocalAuth session (ADR 0011) — bind-mounted so the QR is
+    # scanned once and survives restarts/rebuilds. Create on the host first:
+    #   mkdir -p /home/tomer/whatsapp-session && sudo chown 1000:1000 /home/tomer/whatsapp-session
+    volumes:
+      - /home/tomer/whatsapp-session:/app/.wwebjs_auth
+    # Chromium needs far more shared memory than Docker's 64 MB default; pair
+    # with the --disable-dev-shm-usage flag set in lib/whatsapp.js.
+    shm_size: "512mb"
     depends_on:
       cassandra:
         condition: service_healthy

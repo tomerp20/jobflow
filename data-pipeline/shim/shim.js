@@ -2,6 +2,8 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import pino from 'pino';
 import { buildClient, insertIfNotExists } from './lib/cassandra.js';
+import { createWhatsApp } from './lib/whatsapp.js';
+import { formatMessage, RECIPIENT } from './lib/message.js';
 
 // ── Env config ───────────────────────────────────────────────────────────────
 const SHIM_PORT            = parseInt(process.env.SHIM_PORT ?? '3333', 10);
@@ -142,10 +144,64 @@ async function handleRegister(req, res, client) {
   return send(res, 200, { company: body.company, results });
 }
 
+// WhatsApp Notifier route (ADR 0011). JobFlow POSTs { company, role, url? };
+// the recipient + wording live shim-side (see lib/message.js). Isolated from
+// the Cassandra path: when the WhatsApp client is not ready, this returns 503
+// and /companies is unaffected.
+async function handleNotify(req, res, whatsapp) {
+  // Auth — same bearer token as /companies.
+  if (!checkAuth(req)) {
+    return send(res, 401, { error: 'unauthorized' });
+  }
+
+  const contentType = (req.headers['content-type'] ?? '').toLowerCase();
+  if (!contentType.startsWith('application/json')) {
+    return send(res, 415, { error: 'content-type must be application/json' });
+  }
+
+  let body;
+  try {
+    body = JSON.parse(await readBody(req));
+  } catch (err) {
+    if (err && err.statusCode === 413) {
+      return send(res, 413, { error: 'payload too large' });
+    }
+    return send(res, 400, { error: 'invalid JSON' });
+  }
+
+  // Validation
+  if (typeof body.company !== 'string' || body.company.trim() === '') {
+    return send(res, 400, { error: 'company must be a non-empty string' });
+  }
+  if (typeof body.role !== 'string' || body.role.trim() === '') {
+    return send(res, 400, { error: 'role must be a non-empty string' });
+  }
+  if (body.url !== undefined && body.url !== null && typeof body.url !== 'string') {
+    return send(res, 400, { error: 'url must be a string when provided' });
+  }
+
+  // Degrade cleanly if WhatsApp is down/unauthenticated — never 500, never
+  // touch the Cassandra path.
+  if (!whatsapp || !whatsapp.isReady()) {
+    logger.warn({ company: body.company }, 'whatsapp.unavailable — dropping notify');
+    return send(res, 503, { status: 'whatsapp_unavailable' });
+  }
+
+  const text = formatMessage({ company: body.company, role: body.role, url: body.url });
+  whatsapp.enqueue(text);
+  logger.info({ company: body.company, role: body.role }, 'notify queued');
+  return send(res, 200, { status: 'queued' });
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 // Hoisted so the top-level main().catch() can clean up if startup fails after
 // the Cassandra client has been created but before steady state.
 let client = null;
+
+// The WhatsApp Notifier client (ADR 0011). Stays null until initialised in
+// main(); the /notify handler treats null/not-ready as 503. Module-scoped so
+// the request handler closure can see it.
+let whatsapp = null;
 
 async function main() {
   client = buildClient({
@@ -168,6 +224,11 @@ async function main() {
         logger.error({ err }, 'unhandled handler error');
         if (!res.headersSent) send(res, 500, { error: 'internal server error' });
       });
+    } else if (req.method === 'POST' && req.url === '/notify') {
+      await handleNotify(req, res, whatsapp).catch(err => {
+        logger.error({ err }, 'unhandled handler error');
+        if (!res.headersSent) send(res, 500, { error: 'internal server error' });
+      });
     } else {
       send(res, 404, { error: 'not found' });
     }
@@ -182,6 +243,24 @@ async function main() {
   server.listen(SHIM_PORT, SHIM_BIND_ADDRESS, () => {
     logger.info({ port: SHIM_PORT, bind: SHIM_BIND_ADDRESS }, 'shim listening');
   });
+
+  // WhatsApp Notifier (ADR 0011) — initialised AFTER the HTTP server is
+  // listening and in its own isolated scope, so a dead/unauthenticated
+  // Chromium degrades /notify (503) without ever affecting /companies. Init
+  // is fire-and-forget: errors are logged, never thrown. On first run this
+  // emits a QR (rendered as ASCII in the logs) to scan once.
+  try {
+    whatsapp = createWhatsApp({
+      recipient: RECIPIENT,
+      logger,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+    });
+    whatsapp.init().catch(err => {
+      logger.error({ err: err instanceof Error ? err.message : String(err) }, 'whatsapp.init_failed');
+    });
+  } catch (err) {
+    logger.error({ err: err instanceof Error ? err.message : String(err) }, 'whatsapp.setup_failed');
+  }
 
   // Graceful shutdown: allow in-flight requests to drain before closing Cassandra.
   for (const sig of ['SIGTERM', 'SIGINT']) {

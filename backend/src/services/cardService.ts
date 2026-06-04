@@ -3,6 +3,7 @@ import db from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { shiftUp, shiftDown, withTransaction } from '../util/positions';
 import { runCompanyCheck } from './companyScout/companyScout';
+import { notifyApplicationCreated } from './whatsappNotifier/whatsappNotifier';
 
 export interface CardFilters {
   stage?: string;
@@ -328,6 +329,17 @@ export const cardService = {
         careersUrl: data.careers_url,
       }).catch(() => { /* intentionally suppressed — Scout errors must not fail card creation */ });
     }
+
+    // WhatsApp Notifier (ADR 0011) — fire detached on EVERY Application
+    // creation (manual + Email Agent paths), never awaited so card-creation
+    // latency is unaffected. NOTE: createCard may run inside gmailSync's
+    // per-email transaction, so on a rare rollback this can notify for an
+    // Application that was never saved (accepted edge — see ADR 0011).
+    notifyApplicationCreated({
+      company: data.company_name,
+      role: data.role_title,
+      url: data.application_url,
+    });
 
     // Return card with stage name
     const stage = await runner('stages').where({ id: card.stage_id }).first();

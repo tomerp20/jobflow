@@ -234,6 +234,95 @@ fallback without removing the token.
 
 ---
 
+## WhatsApp Notifier (`POST /notify`) — ADR 0011
+
+The shim also hosts the WhatsApp Notifier: JobFlow POSTs `{ company, role, url }`
+on every Application creation and the shim sends a WhatsApp Message from the
+sender phone's personal account to a single hardcoded recipient (in
+`lib/message.js`). It runs on the same container, port, ngrok tunnel, and bearer
+token as `/companies`; a dead WhatsApp session returns `503` on `/notify` and
+never affects `/companies`.
+
+### First-time setup (one-time QR scan)
+
+```bash
+# 1. Create the host-side session directory (bind-mounted; makes the QR scan
+#    survive restarts/rebuilds). uid 1000 = the container's 'node' user.
+mkdir -p /home/tomer/whatsapp-session
+sudo chown 1000:1000 /home/tomer/whatsapp-session
+
+# 2. Build + start the shim (now Debian-based, with Chromium baked in).
+cd /home/tomer/jobflow/data-pipeline
+docker compose up -d --build shim
+
+# 3. Watch the logs for the ASCII QR code, then scan it from the sender phone:
+#    WhatsApp → Settings → Linked Devices → Link a Device.
+docker logs jf-shim -f
+# Expect: 'whatsapp.qr_required' followed by a QR, then 'whatsapp.authenticated'
+# and 'whatsapp.ready'. The session is now saved to /home/tomer/whatsapp-session.
+```
+
+After `whatsapp.ready`, you only re-scan if the session is invalidated (logout,
+phone offline > ~14 days, or a ban). Detection is manual — `docker logs jf-shim`
+shows `whatsapp.disconnected` / `whatsapp.auth_failure`.
+
+> **If you get a fresh QR on every restart**, the host session directory is not
+> writable by the container's uid 1000. The `LocalAuth` session can't persist, so
+> it re-authenticates each boot — easy to misread as a code bug. Fix the owner and
+> verify:
+> ```bash
+> sudo chown -R 1000:1000 /home/tomer/whatsapp-session
+> ls -ld /home/tomer/whatsapp-session   # owner column must read 1000 (or 'node')
+> ```
+
+### JobFlow (Render) config
+
+Add one env var: `WHATSAPP_NOTIFY_URL` = the same static ngrok base URL already
+used for `COMPANY_REGISTRY_URL` (no `/notify` suffix — the client appends it).
+The bearer token is reused from `COMPANY_REGISTRY_TOKEN`. Leaving
+`WHATSAPP_NOTIFY_URL` unset makes the feature a no-op (`LoggingWhatsAppNotifier`).
+
+### Smoke test
+
+Because this PR changes the shim's base image (Alpine → Debian) and the shared
+container, ADR 0006 / ADR 0011 require the **same transcript** to also prove the
+`/companies` Cassandra path did not regress. Run the `/companies` happy-path +
+Cassandra-row check from the "End-to-end smoke test" section above **first**,
+then the `/notify` checks below.
+
+```bash
+SHIM_URL="https://YOUR_NGROK_HOST"
+TOKEN="your-bearer-token"
+NGROK_HDR=(-H 'ngrok-skip-browser-warning: 1')
+
+# Happy path (with URL) — recipient should receive the message.
+curl -s -X POST "${SHIM_URL}/notify" "${NGROK_HDR[@]}" \
+  -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+  -d '{"company":"Wix","role":"Senior Backend Engineer","url":"https://wix.com/careers/123"}'
+# expected: {"status":"queued"}
+
+# Happy path (no URL) — message sent without the link line.
+curl -s -X POST "${SHIM_URL}/notify" "${NGROK_HDR[@]}" \
+  -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+  -d '{"company":"Acme","role":"Platform Engineer"}'
+# expected: {"status":"queued"}
+
+# Negative paths
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/notify" "${NGROK_HDR[@]}" \
+  -H "Authorization: Bearer wrong" -H "Content-Type: application/json" -d '{}'        # 401
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/notify" "${NGROK_HDR[@]}" \
+  -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -d 'nope'   # 400
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST "${SHIM_URL}/notify" "${NGROK_HDR[@]}" \
+  -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: text/plain" -d 'x'            # 415
+# When the WhatsApp client is not ready: expect 503 {"status":"whatsapp_unavailable"}
+```
+
+> ⚠️ whatsapp-web.js is unofficial (against WhatsApp ToS); ban risk on the sender
+> number is accepted. The `/notify` send queue paces messages (min 3 s apart) so a
+> bulk Email Agent sync doesn't fire a spam-shaped burst.
+
+---
+
 ## Where logs go
 
 - Shim logs: `docker logs jf-shim -f`

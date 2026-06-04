@@ -25,6 +25,11 @@ const schema = z.object({
   GITHUB_TOKEN:            z.string().optional(),
   COMPANY_REGISTRY_URL:    z.string().url().optional(),
   COMPANY_REGISTRY_TOKEN:  z.string().optional(),
+
+  // WhatsApp Notifier (ADR 0011). Optional — feature is a no-op when unset.
+  // Base URL of the shim (same host as COMPANY_REGISTRY_URL); the notifier
+  // appends /notify and reuses COMPANY_REGISTRY_TOKEN as the bearer token.
+  WHATSAPP_NOTIFY_URL:     z.string().url().optional(),
 }).superRefine((v, ctx) => {
   if (v.NODE_ENV !== 'production') return;
 
@@ -42,6 +47,15 @@ const schema = z.object({
 
   if (v.COMPANY_REGISTRY_URL && !v.COMPANY_REGISTRY_URL.startsWith('https://')) {
     ctx.addIssue({ code: 'custom', path: ['COMPANY_REGISTRY_URL'], message: 'COMPANY_REGISTRY_URL must use https:// in production (bearer token must not be sent in plaintext)' });
+  }
+
+  // WhatsApp Notifier reuses COMPANY_REGISTRY_TOKEN as its bearer token, so it
+  // must be present when the notify URL is set; and it must be https in prod.
+  if (v.WHATSAPP_NOTIFY_URL && !v.COMPANY_REGISTRY_TOKEN) {
+    ctx.addIssue({ code: 'custom', path: ['COMPANY_REGISTRY_TOKEN'], message: 'COMPANY_REGISTRY_TOKEN is required when WHATSAPP_NOTIFY_URL is set (reused as the shim bearer token)' });
+  }
+  if (v.WHATSAPP_NOTIFY_URL && !v.WHATSAPP_NOTIFY_URL.startsWith('https://')) {
+    ctx.addIssue({ code: 'custom', path: ['WHATSAPP_NOTIFY_URL'], message: 'WHATSAPP_NOTIFY_URL must use https:// in production (bearer token must not be sent in plaintext)' });
   }
 
   for (const [k, defaultVal] of [
