@@ -84,6 +84,14 @@ _Avoid_: Alert, Toast, Message
 A user-created action item with a description, priority (low / medium / high / urgent), and status (active / completed). A Task may optionally be linked to an Application; without a link it is standalone. Linked Tasks appear on the Application's detail panel; all Tasks are accessible from the dedicated Tasks page.
 _Avoid_: Todo (internal/DB term), Checklist item
 
+**WhatsApp Notifier**:
+An automated process that sends an outbound **WhatsApp Message** from the user's personal WhatsApp account to a single configured recipient whenever an Application is created — across both the manual create path and the Email Agent's auto-create path. A sibling of the Email Agent and Company Scout (automated processes acting on Applications), but triggered by Application creation rather than by email or Company novelty. It runs as a route on the Cassandra write shim on the Linux box and is reached from JobFlow over the existing ngrok tunnel. It produces **no Notification** and writes no `notifications` row — the WhatsApp Message is ephemeral and never persisted in JobFlow.
+_Avoid_: Notification (reserved for the persistent in-app entity), Alert, WhatsApp bot
+
+**WhatsApp Message**:
+The single ephemeral outbound message the WhatsApp Notifier sends on Application creation. Not stored anywhere in JobFlow; not a Notification.
+_Avoid_: Notification, Alert, Toast
+
 ## Relationships
 
 - A **User** owns a set of **Stages**
@@ -98,6 +106,7 @@ _Avoid_: Todo (internal/DB term), Checklist item
 - The **First Sighting** of a **Company** on a new **Application** triggers the **Company Scout**
 - The **Company Scout** resolves a **Company** to zero or more candidate **Orgs**, scores each candidate, and admits those above the acceptance threshold
 - The **Company Scout** classifies each admitted **Org** as having an **Active GitHub Presence** or not, and writes only the active ones to the JobFlow Analytics system's `companies` table — one row per (Company, Org) pair
+- The **WhatsApp Notifier** sends one outbound **WhatsApp Message** to a single configured recipient whenever an **Application** is created (both the manual and Email Agent auto-create paths); it produces no **Notification** and persists nothing in JobFlow
 
 ## Example dialogue
 

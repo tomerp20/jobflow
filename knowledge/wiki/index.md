@@ -35,6 +35,7 @@ Mirror `CONTEXT.md` terms. Each page adds *system context* the glossary cannot c
 
 - [[email-agent]] — reads inbox, routes/creates Applications, produces Notifications
 - [[company-scout]] — runs on First Sighting; resolves Orgs; classifies GH presence
+- [[whatsapp-notifier]] — sends an outbound WhatsApp Message on every Application creation (route on the shim)
 - [[cassandra-analytics-pipeline]] — Cassandra ingestion (Backfill + Hourly Ingest)
 - [[ingestion-pipeline]] — Fetcher → Ingester → Cassandra; subsystem of the above
 - [[backfill]] — nightly catchup process for uninitialised (Company, Org) rows
@@ -66,6 +67,7 @@ Mirror `CONTEXT.md` terms. Each page adds *system context* the glossary cannot c
 - [[adr-0005-processed-files-hourly-only]] → `/docs/adr/0005-processed-files-hourly-only.md`
 - [[adr-0007-processed-files-single-partition]] → `/docs/adr/0007-processed-files-single-partition.md`
 - [[adr-0008-ingester-worker-side-decompression]] → `/docs/adr/0008-ingester-worker-side-decompression.md`
+- [[adr-0011-whatsapp-notifier-on-shim]] → `/docs/adr/0011-whatsapp-notifier-on-shim.md`
 
 ## References (external systems & infrastructure)
 
