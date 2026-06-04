@@ -12,11 +12,36 @@
 // messages, so a bulk Email Agent sync that creates N Applications doesn't fire
 // N near-simultaneous WhatsApp messages (a spam-shaped pattern).
 
+import fs from 'node:fs';
+import path from 'node:path';
 import wweb from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import { toChatId } from './message.js';
 
 const { Client, LocalAuth } = wweb;
+
+// LocalAuth's default profile lives at <cwd>/.wwebjs_auth/session.
+const SESSION_DIR = path.join(process.cwd(), '.wwebjs_auth', 'session');
+
+// Chromium writes a SingletonLock (a symlink stamped with the container
+// hostname) into the profile while running. The host-mounted profile outlives
+// the container, so on every recreate the hostname differs and the stale lock
+// aborts launch with "profile appears to be in use ... on another computer".
+// Removing the Singleton* lock files before launch is always safe here — the
+// authenticated session lives elsewhere in the profile and is left intact, and
+// only one Chromium ever uses this single-tenant volume.
+function clearStaleChromiumLocks(logger) {
+  try {
+    for (const name of fs.readdirSync(SESSION_DIR)) {
+      if (name.startsWith('Singleton')) {
+        fs.rmSync(path.join(SESSION_DIR, name), { force: true });
+        logger.info({ lock: name }, 'whatsapp.cleared_stale_lock');
+      }
+    }
+  } catch {
+    // First run (no profile yet) or nothing to clean — safe to ignore.
+  }
+}
 
 const MIN_SEND_INTERVAL_MS = 3000;
 
@@ -99,6 +124,9 @@ export function createWhatsApp({ recipient, logger, executablePath }) {
       drain();
     },
     init() {
+      // Self-heal the always-stale Chromium lock left by the previous container
+      // so restarts/redeploys don't need a manual cleanup.
+      clearStaleChromiumLocks(logger);
       return client.initialize();
     },
   };
