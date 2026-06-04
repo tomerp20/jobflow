@@ -71,6 +71,14 @@ export function createWhatsApp({ recipient, logger, executablePath }) {
     if (draining) return;
     draining = true;
     while (queue.length > 0) {
+      // If the session dropped mid-drain, stop and log the loss explicitly
+      // rather than throw on every send. This is the ADR 0011 "silent death"
+      // edge — made loud here so it shows up in `docker logs jf-shim`.
+      if (!ready) {
+        logger.warn({ dropped: queue.length }, 'whatsapp.not_ready_mid_drain — dropping queued messages');
+        queue.length = 0;
+        break;
+      }
       const text = queue.shift();
       try {
         await client.sendMessage(chatId, text);

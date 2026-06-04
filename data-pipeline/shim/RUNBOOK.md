@@ -266,6 +266,15 @@ After `whatsapp.ready`, you only re-scan if the session is invalidated (logout,
 phone offline > ~14 days, or a ban). Detection is manual — `docker logs jf-shim`
 shows `whatsapp.disconnected` / `whatsapp.auth_failure`.
 
+> **If you get a fresh QR on every restart**, the host session directory is not
+> writable by the container's uid 1000. The `LocalAuth` session can't persist, so
+> it re-authenticates each boot — easy to misread as a code bug. Fix the owner and
+> verify:
+> ```bash
+> sudo chown -R 1000:1000 /home/tomer/whatsapp-session
+> ls -ld /home/tomer/whatsapp-session   # owner column must read 1000 (or 'node')
+> ```
+
 ### JobFlow (Render) config
 
 Add one env var: `WHATSAPP_NOTIFY_URL` = the same static ngrok base URL already
@@ -274,6 +283,12 @@ The bearer token is reused from `COMPANY_REGISTRY_TOKEN`. Leaving
 `WHATSAPP_NOTIFY_URL` unset makes the feature a no-op (`LoggingWhatsAppNotifier`).
 
 ### Smoke test
+
+Because this PR changes the shim's base image (Alpine → Debian) and the shared
+container, ADR 0006 / ADR 0011 require the **same transcript** to also prove the
+`/companies` Cassandra path did not regress. Run the `/companies` happy-path +
+Cassandra-row check from the "End-to-end smoke test" section above **first**,
+then the `/notify` checks below.
 
 ```bash
 SHIM_URL="https://YOUR_NGROK_HOST"

@@ -19,6 +19,9 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true \
 
 # Chromium + the runtime libraries it needs headless. --no-install-recommends
 # keeps the image lean; fonts-liberation avoids blank glyphs in rendered pages.
+# The explicit lib list is belt-and-suspenders — most are already hard Depends
+# of the `chromium` package — but pinning them documents the headless surface
+# and guards against a future apt resolver trimming a transitive dependency.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
       ca-certificates \
@@ -47,8 +50,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install production deps first so layer caches across source-only edits.
-COPY package.json ./
-RUN npm install --omit=dev --no-audit --no-fund
+# npm ci against the committed lockfile makes rebuilds reproducible (pins the
+# whatsapp-web.js + puppeteer tree so a rebuild can't silently drift).
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
 
 # Source.
 COPY shim.js ./

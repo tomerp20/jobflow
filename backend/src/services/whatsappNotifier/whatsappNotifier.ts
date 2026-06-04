@@ -101,20 +101,18 @@ export class HttpShimWhatsAppNotifier implements WhatsAppNotifier {
   }
 }
 
-let cached: WhatsAppNotifier | null = null;
-
 /**
- * Resolve which WhatsAppNotifier implementation to use:
+ * Resolve which WhatsAppNotifier implementation to use (constructed fresh, to
+ * match resolveRegistry() and avoid module-level state that leaks across tests):
  * - WHATSAPP_NOTIFY_URL set → HttpShimWhatsAppNotifier (production), reusing
  *   COMPANY_REGISTRY_TOKEN as the shared shim bearer token
  * - WHATSAPP_NOTIFY_URL unset → LoggingWhatsAppNotifier (dev fallback / no-op)
  */
 export function resolveWhatsAppNotifier(): WhatsAppNotifier {
-  if (cached) return cached;
-  cached = env.WHATSAPP_NOTIFY_URL
-    ? new HttpShimWhatsAppNotifier(env.WHATSAPP_NOTIFY_URL, env.COMPANY_REGISTRY_TOKEN ?? '')
-    : new LoggingWhatsAppNotifier();
-  return cached;
+  if (env.WHATSAPP_NOTIFY_URL) {
+    return new HttpShimWhatsAppNotifier(env.WHATSAPP_NOTIFY_URL, env.COMPANY_REGISTRY_TOKEN ?? '');
+  }
+  return new LoggingWhatsAppNotifier();
 }
 
 /**
