@@ -6,7 +6,7 @@
 // Single hardcoded recipient (Netali). The recipient lives shim-side so the
 // number/wording can change with a box-side edit + restart — JobFlow never
 // knows who is messaged (it sends only { company, role, url }).
-export const RECIPIENT = '+972525912293';
+export const RECIPIENT = '+972544483175';
 
 // whatsapp-web.js addresses chats by `<countrycode><number>@c.us` with no
 // '+', spaces, or dashes. Normalise any human-formatted number to that form.
