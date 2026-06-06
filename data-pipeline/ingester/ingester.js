@@ -1,4 +1,5 @@
 import { Worker } from 'worker_threads';
+import { existsSync } from 'node:fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -130,19 +131,85 @@ try {
 
     for (const [date, dateHours] of dateHoursMap) {
       try {
-        const eventsWrittenForDate = await processHourBatch(dateHours);
+        // Pre-flight existence check. The orchestrator's range may include
+        // dates the Fetcher never downloaded (permanent GH Archive gaps,
+        // leftover dates outside the current Fetcher window, etc.). Filtering
+        // up front means workers are never spawned for missing files and the
+        // per-date backfill_progress row records exactly what was processed.
+        const dateDir = path.dirname(hourIdToPath(GHARCHIVE_DIR, dateHours[0]));
+        const presentHours = [];
+        const missingHours = [];
+        if (!existsSync(dateDir)) {
+          logger.warn({ date, dateDir }, 'date directory missing on disk — skipping all hours');
+          missingHours.push(...dateHours);
+        } else {
+          for (const hourId of dateHours) {
+            const filePath = hourIdToPath(GHARCHIVE_DIR, hourId);
+            if (existsSync(filePath)) {
+              presentHours.push(hourId);
+            } else {
+              logger.warn({ hourId, filePath }, 'hour file missing on disk — skipping');
+              missingHours.push(hourId);
+            }
+          }
+        }
+
+        // If every hour is missing, still write a backfill_progress row with
+        // events_written=0 so the next nightly run does not re-process this
+        // permanent gap. Skip the worker dispatch entirely.
+        if (presentHours.length === 0) {
+          await writer.writeBackfillProgress(cmd.runId, date, 0);
+          logger.info({ date, missingCount: missingHours.length }, 'date had no present hours — empty backfill_progress row written');
+          continue;
+        }
+
+        const eventsWrittenForDate = await processHourBatch(presentHours);
+
+        // Emit a partial-completion warn before flush/writeBackfillProgress so a
+        // downstream throw does not silently swallow the signal that this date
+        // was partial. presentHours.length < 24 means we already know some
+        // hours were absent.
+        if (missingHours.length > 0) {
+          logger.warn(
+            { date, missingCount: missingHours.length, missingHours },
+            'date had missing hours — events_written reflects only present hours'
+          );
+        }
+
         // Flush remaining per-partition buffers accumulated across this date's files,
         // then record date-level progress only after the flush lands in Cassandra.
         await writer.flushAllPartitionBuffers();
         await writer.writeBackfillProgress(cmd.runId, date, eventsWrittenForDate);
-        logger.info({ date, eventsWritten: eventsWrittenForDate }, 'date complete — backfill_progress written');
+        logger.info(
+          { date, eventsWritten: eventsWrittenForDate, presentHoursCount: presentHours.length, missingHoursCount: missingHours.length },
+          'date complete — backfill_progress written'
+        );
       } catch (err) {
+        // Non-existence errors are filtered upfront. Anything that lands here is
+        // a real failure (Cassandra write, gunzip corruption, JSON parse blow-up,
+        // worker thread crash). Continue to the next date rather than wedging
+        // the rest of the run, but flag the run as failed via exitCode=1.
+        //
+        // Best-effort flush of any partial per-partition buffer state left
+        // behind by the failed date. Without this, leftover events from the
+        // failed date can land in the next date's flush and get mis-counted
+        // in that date's backfill_progress.events_written. Cassandra dedups
+        // on the full PK (ADR 0005) so re-flushing the same events on a future
+        // retry is safe; the goal here is just accurate per-date accounting.
+        try {
+          await writer.flushAllPartitionBuffers();
+        } catch (flushErr) {
+          logger.error(
+            { date, err: flushErr.message },
+            'failed to flush dangling buffers after date error — subsequent date counts may be inflated'
+          );
+        }
         logger.error(
           { date, partition: err.partitionKey ?? null, sampleEventId: err.sampleEventId ?? null, err: err.message },
-          'failed to process date — no backfill_progress row written'
+          'date errored — skipping, continuing to next date'
         );
         exitCode = 1;
-        break;
+        continue;
       }
     }
   } else {

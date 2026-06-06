@@ -10,7 +10,7 @@ sources:
   - data-pipeline/ingester/
   - data-pipeline/orchestrators/
 related: [[cassandra-analytics-pipeline]] [[backfill]] [[hourly-ingest]] [[gh-archive]] [[tracked-event]] [[adr-0003-backfill-hourly-relay-race]] [[adr-0004-microservices-shaped-cli-contract]] [[adr-0005-processed-files-hourly-only]] [[adr-0007-processed-files-single-partition]] [[adr-0008-ingester-worker-side-decompression]] [[infra-linux-deployment]]
-updated: 2026-05-24
+updated: 2026-05-25
 status: stable
 ---
 
@@ -57,7 +57,7 @@ Every per-job parameter is a CLI arg (URL-encoded for tokens with special chars 
 - **Worker owns decompression.** Each worker streams its own file from `GHARCHIVE_DIR`. Main thread no longer touches `createReadStream`/`createGunzip`/`createInterface`.
 - **Chronological finalize.** Workers may complete files out of wall-clock order; main buffers `fileDone` events and writes `processed_files` / `backfill_progress` strictly in input order so the contiguous-prefix invariant from [[adr-0005-processed-files-hourly-only]] holds.
 - **Backpressure.** Main holds off dispatching the next file when events-in-flight to Cassandra exceeds 10K. Mid-file workers keep producing; Cassandra is 99.4% idle today so the watermark rarely fires.
-- **Failure semantics.** First worker error or Cassandra write error stops dispatch. Remaining in-flight writes are awaited so the pool terminates cleanly with `exitCode=1`.
+- **Failure semantics.** In backfill mode the Ingester performs a pre-flight existence check before dispatching any hour to the worker pool: per-date it first checks the date directory exists; if it does, it then filters the date's 24 hourIds down to those whose `.json.gz` is actually present on disk. Workers are never spawned for missing files. A date with at least one missing hour logs a warn for each missing file, and the per-date `backfill_progress` row records `events_written` reflecting only the hours that were processed. A date with zero present hours still gets a `backfill_progress` row with `events_written=0` so the next nightly run does not re-process the permanent gap. The first non-existence worker error or Cassandra write error during a date still stops dispatch and bubbles up to the per-date catch — which logs, attempts a best-effort flush of dangling per-partition buffers, sets `exitCode=1`, and `continue`s to the next date (no longer wedges the rest of the run).
 
 ## Surprises / gotchas
 
@@ -66,6 +66,7 @@ Every per-job parameter is a CLI arg (URL-encoded for tokens with special chars 
 - "Catchup" is the **hourly fetcher's** mode (resumption after a gap). Don't confuse with [[backfill]] which is the nightly all-rows sweep.
 - In backfill mode, per-partition batch buffers in `cassandra-writer.js` now contain events from multiple hours concurrently. Correctness is preserved (Cassandra dedups via the full primary key + `flushAllPartitionBuffers` runs at date boundary before `backfill_progress` is written), but reasoning about the buffer content requires this awareness.
 - `UV_THREADPOOL_SIZE=16` is set by `run-{backfill,hourly}.sh` to give libuv headroom for 8 workers × 1 concurrent gunzip each. Operator overrides via the cron line still win.
+- Missing GH Archive files (`ENOENT`) are tolerated at per-hour granularity in backfill mode via an Ingester-layer pre-flight check (NOT at the worker layer — `fileStream.pipe(gunzip)` does not propagate read-side errors, so an ENOENT inside the worker crashes the worker thread rather than reaching its own try/catch; an earlier attempt to handle missing files inside the worker silently deadlocked the dispatch when whole directories were absent). The orchestrator's `diskBounds.earliest` can point at a date whose hour files are not all present (e.g. a permanent gap from a 404 the Fetcher saw historically, or a leftover date outside the current Fetcher window); the Ingester logs each missing hour, writes a `backfill_progress` row with `events_written=N` reflecting only present hours (or 0 if every hour is missing), and continues. See issue #255 / PR #256 for the production incident on `2025-01-08` and the subsequent fix.
 
 ## Source pointers
 
